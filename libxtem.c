@@ -114,8 +114,8 @@ rsp_t *xtem_rsp_init() {
 
 int xtem_rsp_s(rsp_t *r) {
 	r = r;
-	printf("Hello step -- press enter\n");
-	getchar();
+	//printf("Hello step -- press enter\n");
+	//getchar();
 	return 42;
 }
 
