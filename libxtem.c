@@ -29,7 +29,7 @@ typedef struct {
 } xtem_t;
 
 static void xtem_reset(xtem_t *x) {
-	x->r.ax = 0x0000;
+	x->r.ax = 0x1234;
 	x->r.cx = 0x0000;
 	x->r.dx = 0x0000;
 	x->r.bx = 0x0000;
@@ -102,6 +102,58 @@ static void memr(xtem_t *x, void **dest, int *len, int addr) {
 	}
 }
 
+static int step(xtem_t *x) {
+	int ret = 0;
+	uint8_t *opc = 0;
+	int len = 8;
+	int pc = x->r.cs * 16 + x->r.ip;
+	memr(x, (void **)&opc, &len, pc);
+	if (!opc) {
+		return 1;
+	}
+	switch (opc[0]) {
+		//case 0x8e:// mov Sw Ew
+				//break;
+		case 0xb0:// mov Al Ib
+		{
+				uint8_t Ib = *(uint8_t *)(opc + 1);
+				x->r.ax &= 0xff00;
+				x->r.ax |= Ib;
+				x->r.ip++;
+				break;
+		}
+		case 0x90:// nop
+				x->r.ip++;
+				break;
+		case 0xfa:// cli
+				x->r.fl &= ~(1 << 9);
+				x->r.ip++;
+				break;
+		case 0xfc:// cld
+				x->r.fl &= ~(1 << 10);
+				x->r.ip++;
+				break;
+		case 0xea:// jmp ofs seg
+		{
+				uint16_t ofs = *(uint16_t *)(opc + 1);
+				uint16_t seg = *(uint16_t *)(opc + 3);
+				printf("JMP ofs=%04" PRIx16 " seg=%04" PRIx16 "\n", ofs, seg);
+				x->r.cs = seg;
+				x->r.ip = ofs;
+				break;
+		}
+		case 0x4e://dec si
+				x->r.si--;
+				x->r.ip++;
+				break;
+		default:
+				ret = 2;
+				printf("PC=%05" PRIx32 " OPC=%02" PRIx8 " notimp !!\n", pc, opc[0]);
+				break;
+	}
+	return ret;
+}
+
 typedef struct {
 	xtem_t *x;
 } rsp_t;
@@ -113,9 +165,9 @@ rsp_t *xtem_rsp_init() {
 }
 
 int xtem_rsp_s(rsp_t *r) {
-	r = r;
-	//printf("Hello step -- press enter\n");
-	//getchar();
+	if (step(r->x)) {
+		exit(1);
+	}
 	return 42;
 }
 
