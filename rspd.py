@@ -41,7 +41,8 @@ while True:
 			#print("res=%d" % res)
 			r+="S05"
 		elif c[0]=='c':			# continue execution
-			s.sendall("$O4142430D0A#66")
+			res=lib.xtem_rsp_c(rsp)
+			#print("res=%d" % res)
 			r+="S05"
 			#r+="O414243440D0A"
 		elif c[0]=='g':			# get registers
