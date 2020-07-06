@@ -6,6 +6,8 @@
 #include <string.h>
 #include <malloc.h>
 
+#define NOTIMP(...) do{printf("NOTIMP :%d : ", __LINE__);printf(__VA_ARGS__);}while(0)
+
 typedef struct {
 	uint16_t ax;
 	uint16_t cx;
@@ -30,17 +32,17 @@ typedef struct {
 } xtem_t;
 
 static void xtem_reset(xtem_t *x) {
-	x->r.ax = 0x1234;
+	x->r.ax = 0x0000;
 	x->r.cx = 0x0000;
-	x->r.dx = 0x0000;
+	x->r.dx = 0x0480;
 	x->r.bx = 0x0000;
 	x->r.sp = 0x0000;
 	x->r.bp = 0x0000;
 	x->r.si = 0x0000;
 	x->r.di = 0x0000;
-	x->r.ip = 0x0000;
+	x->r.ip = 0xFFF0;
 	x->r.fl = 0x0002;
-	x->r.cs = 0xffff;
+	x->r.cs = 0xF000;
 	x->r.ss = 0x0000;
 	x->r.ds = 0x0000;
 	x->r.es = 0x0000;
@@ -48,7 +50,8 @@ static void xtem_reset(xtem_t *x) {
 
 #define RAM_FIRST 0x00000
 #define RAM_LAST 0x80000
-#define BIOS_FIRST 0xf8000
+//#define BIOS_FIRST 0xf8000
+#define BIOS_FIRST 0xf0000
 #define BIOS_LAST 0xfffff
 #define MEM_LAST 0xfffff
 
@@ -72,7 +75,8 @@ static int xtem_load_bios(xtem_t *x, char *bios_file) {
 static xtem_t *xtem_init() {
 	xtem_t *x = calloc(1, sizeof(xtem_t));
 	xtem_reset(x);
-	xtem_load_bios(x, "bios");
+//	xtem_load_bios(x, "bios");
+	xtem_load_bios(x, "bios64");
 	x->ram = calloc(1, RAM_LAST - RAM_FIRST + 1);
 	return x;
 }
@@ -114,17 +118,26 @@ static void memr(xtem_t *x, void **dest, int *len, int addr) {
 
 static int step(xtem_t *x) {
 	int ret = 0;
-	uint8_t *opc = 0;
+	uint8_t *_opc = 0, *opc;
 	int len = 8;
 	int pc = x->r.cs * 16 + x->r.ip;
-	memr(x, (void **)&opc, &len, pc);
-	if (!opc) {
+	printf("%05x ", pc);
+	memr(x, (void **)&_opc, &len, pc);
+	if (!_opc) {
 		return 1;
 	}
+	opc = _opc;
 	uint8_t Ib, Eb, Ev;
 	uint16_t Iv;
 	uint16_t seg;
+//	enum def_seg {DEF_DS, DEF_ES} = DEF_DS;
+//	while (1) {
 	switch (opc[0]) {
+//		case 0x26://	ES:
+//			x->r.ip++;
+//			def_seg = SEG_ES;
+//			opc++;
+//			continue;
 		case 0x33://	XOR		Gv	Ev
 			x->r.ip++;
 			Ev = *(uint8_t *)(opc + 1);
@@ -134,9 +147,12 @@ static int step(xtem_t *x) {
 				case 0xC0://ax,ax
 					x->r.ax = x->r.ax ^ x->r.ax;
 					break;
+				case 0xFF://di,di
+					x->r.di = x->r.di ^ x->r.di;
+					break;
 				default:
 					ret = 6;
-					printf("Ev=%02" PRIx8 " notimp !!\n", Ev);
+					NOTIMP("Ev=%02" PRIx8 "\n", Ev);
 					break;
 			}
 			break;
@@ -149,6 +165,27 @@ static int step(xtem_t *x) {
 			x->r.ip++;
 			x->r.si--;
 			break;
+#if 0
+		case 0x89://	MOV		Ev	Gv
+			x->r.ip++;
+			uint16_t Gv = *(uint16_t *)(opc + 2);
+			Ev = *(uint8_t *)(opc + 1);
+			x->r.ip += 3;
+			uint16_t *mem = 0;
+			int len = 2;
+			int addr = x->r.ds * 16 + Gv;
+			memw(x, (void **)&mem, &len, addr);
+			if (!mem) {
+				return 1;
+			}
+			printf("MOV		Ev=%02" PRIx8 " Ev=%01" PRIx8 "\n", Gv, Ev);
+			switch (Ev) {
+				case 0x36:
+					x->r.si = *mem;
+					break;
+			}
+			break;
+#endif
 		case 0x8B://	MOV		Gv	Ev
 			x->r.ip++;
 			uint16_t Gv = *(uint16_t *)(opc + 2);
@@ -168,30 +205,40 @@ static int step(xtem_t *x) {
 					break;
 			}
 			break;
+#if 1
 		case 0x8E://	MOV		Sw	Ew
 			x->r.ip++;
 			uint16_t Sw = (*(uint16_t *)(opc + 1) & 0xF0) >> 4;
 			uint16_t Ew = *(uint16_t *)(opc + 1) & 0x0F;
 			x->r.ip++;
+			printf("MOV		Sw	Ew\n");
+			uint16_t reg;
+			switch (Ew) {
+				case 0x3://bx
+					reg = x->r.bx;
+					break;
+				case 0x8://ax
+					reg = x->r.ax;
+					break;
+				default:
+					ret = 5;
+					NOTIMP("Ew=%01" PRIx8 "\n", Ew);
+					break;
+			}
 			switch (Sw) {
+				case 0xC://es
+					x->r.es = reg;
+					break;
 				case 0xD://ds
-					seg = x->r.ds;
-					switch (Ew) {
-						case 0x8:
-							x->r.ax = seg;
-							break;
-						default:
-							ret = 5;
-							printf("Ew=%01" PRIx8 " notimp !!\n", Ew);
-							break;
-					}
+					x->r.ds = reg;
 					break;
 				default:
 					ret = 4;
-					printf("Sw=%01" PRIx8 " notimp !!\n", Sw);
+					NOTIMP("Sw=%01" PRIx8 "\n", Sw);
 					break;
 			}
 			break;
+#endif
 		case 0x90://	NOP
 			x->r.ip++;
 			printf("NOP\n");
@@ -267,13 +314,13 @@ static int step(xtem_t *x) {
 					break;
 				default:
 					ret = 3;
-					printf("GRP4/%01" PRIx8 " notimp !!\n", Eb & 0xf);
+					NOTIMP("GRP4/%01" PRIx8 "\n", Eb & 0xf);
 					break;
 			}
 			break;
 		default:
 			ret = 2;
-			printf("PC=%05" PRIx32 " OPC=%02" PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8 " notimp !!\n", pc, opc[0], opc[1], opc[2], opc[3]);
+			NOTIMP("PC=%05" PRIx32 " OPC=%02" PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "\n", pc, opc[0], opc[1], opc[2], opc[3]);
 			break;
 	}
 	return ret;
@@ -290,16 +337,21 @@ rsp_t *xtem_rsp_init() {
 }
 
 int xtem_rsp_s(rsp_t *r) {
-	return step(r->x);
+	if (step(r->x)) {
+		exit(1);
+	}
+	return 42;
 }
 
 int xtem_rsp_c(rsp_t *r) {
+	int ret = 0;
 	while (1) {
-		if (step(r->x)) {
+		ret = step(r->x);
+		if (ret) {
 			break;
 		}
 	}
-	return 42;
+	return ret;
 }
 
 int xtem_rsp_g(rsp_t *r, char *data) {

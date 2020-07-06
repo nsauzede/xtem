@@ -5,14 +5,17 @@
 import ctypes
 lib=ctypes.cdll.LoadLibrary("./libxtem.so")
 lib.xtem_rsp_init.restype = ctypes.c_void_p
-lib.xtem_rsp_g.argtypes = (ctypes.c_void_p,ctypes.c_char_p,)
+lib.xtem_rsp_s.argtypes = (ctypes.c_void_p,)
+lib.xtem_rsp_c.argtypes = (ctypes.c_void_p,)
+lib.xtem_rsp_g.argtypes = (ctypes.c_void_p,ctypes.c_char_p)
 lib.xtem_rsp_m.argtypes = (ctypes.c_void_p,ctypes.c_char_p,ctypes.c_int,ctypes.c_int)
 rsp=lib.xtem_rsp_init()
+print("rsp=%x" % rsp)
 
 import socket
 ss=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 ss.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-port=1234;ss.bind(("",port));ss.listen(1);print("accepting on port %d.."%port)
+port=1235;ss.bind(("",port));ss.listen(1);print("accepting on port %d.."%port)
 s,addr=ss.accept();print("receiving from %s.."%str(addr))
 while True:
 	a=s.recv(1).decode()
@@ -66,9 +69,6 @@ while True:
 			data = data.decode()
 			#print("after=%s" % data)
 			r+=data
-		elif c[0]=='p':			# get register
-			reg=int(c[1],16)		# AX=0 PC=8..
-			r+="%08x"%reg
 		for c in r:
 			csum+=ord(c)
 		csum&=0xff
