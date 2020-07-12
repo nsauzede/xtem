@@ -29,6 +29,7 @@ typedef struct {
 	regs_t r;
 	unsigned char *bios;
 	unsigned char *ram;
+	enum {SEG_DS, SEG_ES} def_seg;
 } xtem_t;
 
 static void xtem_reset(xtem_t *x) {
@@ -133,6 +134,9 @@ static int parity_odd16(uint16_t val) {
 	return 1;
 }
 
+// return : 0 => executed 1 insn succesfully
+// return : 1 => executed 1 prefix succesfully (eg: not atomic for IRQ handling)
+// return : <0 => error
 static int step(xtem_t *x) {
 	int ret = 0;
 	uint8_t *_opc = 0, *opc;
@@ -144,15 +148,16 @@ static int step(xtem_t *x) {
 		return 1;
 	}
 	opc = _opc;
-	uint8_t Ib, Eb, Ev, reg;
+	uint8_t Ib, Eb, Ev;
 	uint16_t Iw;
 	uint16_t seg;
+	int pfx = 0;
+	uint8_t mod, reg, rm;
 #if 1
 	uint16_t *mem;
 	int addr;
 	uint16_t Gv;
 #endif
-	enum {SEG_DS, SEG_ES} def_seg = SEG_DS;
 #define OF 0x800
 #define DF 0x400
 #define IF 0x200
@@ -167,9 +172,9 @@ static int step(xtem_t *x) {
 		case 0x26://	ES:
 			x->r.ip++;
 			printf("ES:\n");
-			def_seg = SEG_ES;
-			opc++;
-			continue;
+			x->def_seg = SEG_ES;
+			pfx = 1;
+			break;
 		case 0x33://	XOR		Gv	Ev
 			x->r.ip++;
 			Ev = *(uint8_t *)(opc + 1);
@@ -183,7 +188,7 @@ static int step(xtem_t *x) {
 					Iw = x->r.di = x->r.di ^ x->r.di;
 					break;
 				default:
-					ret = 6;
+					ret = -6;
 					NOTIMP("Ev=%02" PRIx8 "\n", Ev);
 					break;
 			}
@@ -220,41 +225,59 @@ static int step(xtem_t *x) {
 			x->r.si--;
 			break;
 #endif
+		// PC=fe0cd OPC=3B15
+		// 001110 1 1 00 010 101
+		// mod=0 reg=2 rm=5
+		// 000FE0CA  8915              mov    WORD PTR [di],dx
+		case 0x3B://	CMP		REG16,REG16/MEM16
+			mod = (opc[1] & 0xc0) >> 6;
+			reg = (opc[1] & 0x38) >> 3;
+			rm = opc[1] & 0x07;
+			mem = 0;
+			len = 2;
+			ret = -1;
+			NOTIMP("MOV		REG16/MEM16,REG16\n");
+			break;
 #if 1
 		// PC=fe0ca OPC=89 15
 		// 100010 0 1 00 010 101
 		// mod=0 reg=2 rm=5
 		// 000FE0CA  8915              mov    WORD PTR [di],dx
 		case 0x89://	MOV		REG16/MEM16,REG16
-		{
-			x->r.ip++;
-			uint8_t mod = (opc[1] & 0xc0) >> 6;
-			uint8_t reg = (opc[1] & 0x38) >> 3;
-			uint8_t rm = opc[1] & 0x07;
-			x->r.ip++;
+			mod = (opc[1] & 0xc0) >> 6;
+			reg = (opc[1] & 0x38) >> 3;
+			rm = opc[1] & 0x07;
 			mem = 0;
 			len = 2;
+			printf("MOV		REG16/MEM16,REG16\n");
 			switch (mod) {
 				case 0x0://memory mode, no displacement follows except rm==6
 					switch (rm) {
 						case 0x5://(di)
-							addr = (def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
+							addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
 							memw(x, (void **)&mem, &len, addr);
 							if (!mem) {
-								return 1;
+								NOTIMP("Failed to acquire mem\n");
+								return -1;
 							}
 							break;
 						default:
-							ret = 5;
+							ret = -5;
 							NOTIMP("???? mod=%01" PRIx8 " reg=%01" PRIx8 " rm=%01" PRIx8 "\n", mod, reg, rm);
 							break;
 					}
 					break;
+#if 0
 				case 0x1://memory mode, disp8 follows
 					break;
 				case 0x2://memory mode, disp16 follows
 					break;
 				case 0x3://register mode, no displacement follows
+					break;
+#endif
+				default:
+					ret = -5;
+					NOTIMP("mod=%02" PRIx8 "\n", mod);
 					break;
 			}
 			if (mem) {
@@ -264,42 +287,81 @@ static int step(xtem_t *x) {
 						regv = x->r.dx;
 						break;
 					default:
-						ret = 5;
+						ret = -5;
 						NOTIMP("???? mod=%01" PRIx8 " reg=%01" PRIx8 " rm=%01" PRIx8 "\n", mod, reg, rm);
 						break;
 				}
-				*((uint16_t *)mem) = regv;
+				if (!ret) {
+					x->r.ip += 2;
+					*((uint16_t *)mem) = regv;
+				}
+			} else {
+				ret = -1;
+				NOTIMP("!mem\n");
+				break;
 			}
 			break;
-		}
 #endif
 #if 1
+		//               d w mod reg r/m
+		// 8B36 : 100010 1 1  00 110 110
+		// 8BE8 : 100010 1 1  11 011 000
 		// 8B367200          mov si,[0x72]
 		// 8BE8              mov bp,ax
-		case 0x8B://	MOV		Gv	Ev
-			x->r.ip++;
-			Gv = *(uint16_t *)(opc + 2);
+		case 0x8B://	MOV		REG16,REG16
+			mod = (opc[1] & 0xc0) >> 6;
+			reg = (opc[1] & 0x38) >> 3;
+			rm = opc[1] & 0x07;
+			printf("MOV		REG16/MEM16,REG16\n");
+			if (mod == 0x00) {
 			Ev = *(uint8_t *)(opc + 1);
-			x->r.ip += 3;
+			Gv = *(uint16_t *)(opc + 2);
 			mem = 0;
 			len = 2;
 			addr = x->r.ds * 16 + Gv;
 			memr(x, (void **)&mem, &len, addr);
 			if (!mem) {
-				return 1;
+				NOTIMP("Failed to acquire mem\n");
+				return -1;
 			}
-			printf("MOV		Gv=%04" PRIx16 " Ev=%01" PRIx8 "\n", Gv, Ev);
-			switch (Ev) {
-				case 0x36:
-					x->r.si = *mem;
-					break;
-				case 0xe8:
-					x->r.bp = x->r.ax;
-					break;
+			switch (reg) {
+				case 0x06:x->r.si = *mem;break;
 				default:
-					ret = 5;
-					NOTIMP("Ev=%02" PRIx8 "\n", Ev);
+					ret = -5;
+					NOTIMP("reg=%02" PRIx8 "\n", reg);
 					break;
+			}
+			if (!ret) {
+				x->r.ip += 4;
+			}
+			} else if (mod == 0x03) {
+				switch (rm) {
+					case 0x00:Iw = x->r.ax;break;
+					default:
+						ret = -5;
+						NOTIMP("rm=%02" PRIx8 "\n", rm);
+						break;
+				}
+				switch (reg) {
+					case 0x00:x->r.ax = Iw;break;
+					case 0x01:x->r.cx = Iw;break;
+					case 0x02:x->r.dx = Iw;break;
+					case 0x03:x->r.bx = Iw;break;
+					case 0x04:x->r.sp = Iw;break;
+					case 0x05:x->r.bp = Iw;break;
+					case 0x06:x->r.si = Iw;break;
+					case 0x07:x->r.di = Iw;break;
+					default:
+						ret = -5;
+						NOTIMP("reg=%02" PRIx8 "\n", reg);
+						break;
+				}
+				if (!ret) {
+					x->r.ip += 2;
+				}
+			} else {
+				ret = -5;
+				NOTIMP("mod=%02" PRIx8 "\n", mod);
 			}
 			break;
 #endif
@@ -319,7 +381,7 @@ static int step(xtem_t *x) {
 					regv = x->r.ax;
 					break;
 				default:
-					ret = 5;
+					ret = -5;
 					NOTIMP("Ew=%01" PRIx8 "\n", Ew);
 					break;
 			}
@@ -331,7 +393,7 @@ static int step(xtem_t *x) {
 					x->r.ds = regv;
 					break;
 				default:
-					ret = 4;
+					ret = -4;
 					NOTIMP("Sw=%01" PRIx8 "\n", Sw);
 					break;
 			}
@@ -446,17 +508,24 @@ static int step(xtem_t *x) {
 					x->r.ax = (x->r.ax & 0xff00) + (((x->r.ax & 0xff) + 1));
 					break;
 				default:
-					ret = 3;
+					ret = -3;
 					NOTIMP("GRP4/%01" PRIx8 "\n", Eb & 0xf);
 					break;
 			}
 			break;
 		default:
-			ret = 2;
+			ret = -2;
 			NOTIMP("PC=%05" PRIx32 " OPC=%02" PRIx8 " %02" PRIx8 " %02" PRIx8 " %02" PRIx8 "\n", pc, opc[0], opc[1], opc[2], opc[3]);
 			break;
 	}
 	break;
+	}
+	if (!pfx) {
+		x->def_seg = SEG_DS;
+	} else {
+		if (!ret) {
+			ret = 1;
+		}
 	}
 	return ret;
 }
@@ -472,8 +541,15 @@ rsp_t *xtem_rsp_init() {
 }
 
 int xtem_rsp_s(rsp_t *r) {
-	if (step(r->x)) {
-		exit(1);
+	while (1) {
+		int n = step(r->x);
+		if (n == 1) {
+			continue;//was a prefix
+		} else if (n == 0) {
+			break;//was an atomic insn
+		} else {
+			exit(1);//was an error
+		}
 	}
 	return 42;
 }

@@ -37,8 +37,8 @@ def send_recv_packet2(s1, s2, packet):
 	packet1 = send_recv_packet(s1, packet)
 	packet2 = send_recv_packet(s2, packet)
 #	print("received2 %d %s %s" % (len(packet2), type(packet2), packet2))
-	if packet2[:96] != packet1[:96]:
-		print("ERROR : packet2 is different from packet1 !\nreceived2 %d %s" % (len(packet2), packet2[:96]))
+#	if packet2[:96] != packet1[:96]:
+#		print("ERROR : packet2 is different from packet1 !\nreceived2 %d %s" % (len(packet2), packet2[:96]))
 #		print("ERROR : packet2 is different from packet1 !")
 #		for c in packet2:
 #			print("%x" % ord(c),end="")
@@ -47,19 +47,23 @@ def send_recv_packet2(s1, s2, packet):
 #			print("%x" % ord(c),end="")
 #		print("")
 #		print("received1 %d %s %s" % (len(packet1), type(packet1), packet1))
-		print("received1 %d %s" % (len(packet1), packet1[:96]))
-		return None
+#		print("received1 %d %s" % (len(packet1), packet1[:96]))
+#		return None
 #	print("received1 %d %s %s" % (len(packet1), type(packet1), packet1))
-	return packet1
+#	return packet1
+	return packet1,packet2
 
 while True:
-	a = send_recv_packet2(s1, s2, "+$?#3f")
+	a1,a2 = send_recv_packet2(s1, s2, "+$?#3f")
 	while True:
-		a = send_recv_packet2(s1, s2, "+$g#67")
-		if a==None:
+		packet1,packet2 = send_recv_packet2(s1, s2, "+$g#67")
+		if packet2[:96] != packet1[:96]:
+			print("ERROR : packet2 is different from packet1 !\nreceived2 %d %s" % (len(packet2), packet2[:96]))
+			print("received1 %d %s" % (len(packet1), packet1[:96]))
 			break
-		a = send_recv_packet2(s1, s2, "+$s#73")
-		if a==None:
-			break
-	a = send_recv_packet2(s1, s2, "+$k#6b")
+		a1,a2 = send_recv_packet2(s1, s2, "+$s#73")
+		if packet2 != packet1:
+			pass
+#			break
+	a1,a2 = send_recv_packet2(s1, s2, "+$k#6b")
 	break;
