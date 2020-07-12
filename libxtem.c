@@ -120,6 +120,19 @@ static void memw(xtem_t *x, void **dest, int *len, int addr) {
 	memr(x, dest, len, addr);
 }
 
+static int parity_odd16(uint16_t val) {
+	int count = 0;
+	for (int i = 0; i < 16; i++) {
+		if (val & (1 << i)) {
+			count++;
+		}
+	}
+	if (count % 2) {
+		return 0;
+	}
+	return 1;
+}
+
 static int step(xtem_t *x) {
 	int ret = 0;
 	uint8_t *_opc = 0, *opc;
@@ -140,6 +153,15 @@ static int step(xtem_t *x) {
 	uint16_t Gv;
 #endif
 	enum {SEG_DS, SEG_ES} def_seg = SEG_DS;
+#define OF 0x800
+#define DF 0x400
+#define IF 0x200
+#define TF 0x100
+#define SF 0x080
+#define ZF 0x040
+#define AF 0x010
+#define PF 0x004
+#define CF 0x001
 	while (1) {
 	switch (opc[0]) {
 		case 0x26://	ES:
@@ -155,20 +177,40 @@ static int step(xtem_t *x) {
 			printf("XOR		Gv	Ev\n");
 			switch (Ev) {
 				case 0xC0://ax,ax
-					x->r.ax = x->r.ax ^ x->r.ax;
+					Iw = x->r.ax = x->r.ax ^ x->r.ax;
 					break;
 				case 0xFF://di,di
-					x->r.di = x->r.di ^ x->r.di;
+					Iw = x->r.di = x->r.di ^ x->r.di;
 					break;
 				default:
 					ret = 6;
 					NOTIMP("Ev=%02" PRIx8 "\n", Ev);
 					break;
 			}
+			if (Iw == 0) {
+				x->r.fl |= ZF;
+			} else {
+				x->r.fl &= ~ZF;
+			}
+			if (parity_odd16(Iw)) {
+				x->r.fl |= PF;
+			} else {
+				x->r.fl &= ~PF;
+			}
 			break;
 		case 0x40://	INC		eAX
 			x->r.ip++;
 			printf("INC		AX\n");
+			if (x->r.ax == 0xff) {
+				x->r.fl |= AF;
+			} else {
+				x->r.fl &= ~AF;
+			}
+			if (parity_odd16(x->r.ax)) {
+				x->r.fl |= PF;
+			} else {
+				x->r.fl &= ~PF;
+			}
 			x->r.ax++;
 			break;
 #if 0
@@ -449,13 +491,13 @@ int xtem_rsp_c(rsp_t *r) {
 
 int xtem_rsp_g(rsp_t *r, char *data) {
 	int len = strlen(data);
-	//printf("len=%d\n", len);
+//	printf("len=%d\n", len);
 	int pos = 0;
 	do {
 #define WR_REG16(reg16) do{ \
-	if (pos + 4 > len) break; \
+	if (pos + 2 > len) break; \
 	pos += snprintf(data + pos, 2 + 1, "%02" PRIx8, reg16 & 0xff); \
-	if (pos + 4 > len) break; \
+	if (pos + 2 > len) break; \
 	pos += snprintf(data + pos, 2 + 1, "%02" PRIx8, reg16 >> 8); \
 	if (pos + 4 > len) break; \
 	pos += snprintf(data + pos, 4 + 1, "%04" PRIx16, 0); \
@@ -476,7 +518,11 @@ int xtem_rsp_g(rsp_t *r, char *data) {
 		WR_REG16(0);//fs
 		WR_REG16(0);//gs
 	} while (0);
+	for (; pos < len; pos++) {
+		data[pos] = '0';
+	}
 	//printf("Hello data=%s\n", data);
+//	printf("Hello pos=%d data=%s\n", pos, data);
 	//getchar();
 	return 42;
 }

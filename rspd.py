@@ -37,19 +37,23 @@ while True:
 		if c[0]=='?':			# get program status
 			#s.sendall("$O4142430D0A#66")
 			r+="S05"
+#			r+="T05thread:01;"
 			#r+="O4142430D0A"
 			#r+="OABCDEFGHIJK"
+		elif c[0]=='k':			# kill
+			break
 		elif c[0]=='s':			# step instruction
 			res=lib.xtem_rsp_s(rsp)
 			#print("res=%d" % res)
 			r+="S05"
+#			r+="T05thread:01;"
 		elif c[0]=='c':			# continue execution
 			res=lib.xtem_rsp_c(rsp)
 			#print("res=%d" % res)
 			r+="S05"
 			#r+="O414243440D0A"
 		elif c[0]=='g':			# get registers
-			data="0"*8*16
+			data="0"*(8*16+560)
 			data = data.encode()
 			#print("before=%s" % data)
 			res=lib.xtem_rsp_g(rsp, data)
