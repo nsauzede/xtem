@@ -57,9 +57,10 @@ while True:
 	a1,a2 = send_recv_packet2(s1, s2, "+$?#3f")
 	while True:
 		packet1,packet2 = send_recv_packet2(s1, s2, "+$g#67")
-		if packet2[:96] != packet1[:96]:
-			print("ERROR : packet2 is different from packet1 !\nreceived2 %d %s" % (len(packet2), packet2[:96]))
-			print("received1 %d %s" % (len(packet1), packet1[:96]))
+		l=130
+		if packet2[:l] != packet1[:l]:
+			print("ERROR : packet2 is different from packet1 !\nreceived2 %d %s" % (len(packet2), packet2[:l]))
+			print("received1 %d %s" % (len(packet1), packet1[:l]))
 			break
 		a1,a2 = send_recv_packet2(s1, s2, "+$s#73")
 		if packet2 != packet1:

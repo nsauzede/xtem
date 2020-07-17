@@ -30,6 +30,7 @@ typedef struct {
 	unsigned char *bios;
 	unsigned char *ram;
 	enum {SEG_DS, SEG_ES} def_seg;
+	enum {REP_NOT, REP_REPNZ, REP_REPZ} def_rep;
 } xtem_t;
 
 static void xtem_reset(xtem_t *x) {
@@ -151,7 +152,8 @@ static int step(xtem_t *x) {
 	uint8_t Ib, Eb, Ev;
 	uint16_t Iw;
 	uint16_t seg;
-	int pfx = 0;
+	int pfx_seg = 0;
+	int pfx_rep = 0;
 	uint8_t mod, reg, rm;
 #if 1
 	uint16_t *mem;
@@ -167,13 +169,20 @@ static int step(xtem_t *x) {
 #define AF 0x010
 #define PF 0x004
 #define CF 0x001
+	printf("RIGHT NOW DS=%04" PRIx16 "\n", x->r.ds);
 	while (1) {
 	switch (opc[0]) {
 		case 0x26://	ES:
 			x->r.ip++;
 			printf("ES:\n");
 			x->def_seg = SEG_ES;
-			pfx = 1;
+			pfx_seg = 1;
+			break;
+		case 0xF3://	REPZ:
+			x->r.ip++;
+			printf("REPZ:\n");
+			x->def_rep = REP_REPZ;
+			pfx_rep = 1;
 			break;
 		case 0x33://	XOR		Gv	Ev
 			x->r.ip++;
@@ -203,6 +212,65 @@ static int step(xtem_t *x) {
 				x->r.fl &= ~PF;
 			}
 			break;
+		// PC=fe0cd OPC=3B15
+		// 001110 1 1 00 010 101
+		// mod=0 reg=2 rm=5
+		// 000FE0CD  3B15              cmp    dx,WORD PTR [di],
+		case 0x3B://	CMP		REG16,REG16/MEM16
+			mod = (opc[1] & 0xc0) >> 6;
+			reg = (opc[1] & 0x38) >> 3;
+			rm = opc[1] & 0x07;
+			mem = 0;
+			len = 2;
+			printf("CMP		REG16/MEM16,REG16\n");
+			switch (mod) {
+				case 0x0://memory mode, no displacement follows except rm==6
+					switch (rm) {
+						case 0x5://(di)
+							printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
+							addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
+							memr(x, (void **)&mem, &len, addr);
+							if (!mem) {
+								NOTIMP("Failed to acquire mem\n");
+								return -1;
+							}
+							break;
+						default:
+							ret = -5;
+							NOTIMP("???? mod=%01" PRIx8 " reg=%01" PRIx8 " rm=%01" PRIx8 "\n", mod, reg, rm);
+							break;
+					}
+					break;
+				default:
+					ret = -5;
+					NOTIMP("mod=%02" PRIx8 "\n", mod);
+					break;
+			}
+			if (mem) {
+				uint16_t regv;
+				switch (reg) {
+					case 0x2:
+						regv = x->r.dx;
+						break;
+					default:
+						ret = -5;
+						NOTIMP("???? mod=%01" PRIx8 " reg=%01" PRIx8 " rm=%01" PRIx8 "\n", mod, reg, rm);
+						break;
+				}
+				if (!ret) {
+					x->r.ip += 2;
+					if (*((uint16_t *)mem) == regv) {
+						x->r.fl |= ZF;
+					} else {
+						x->r.fl &= ~ZF;
+					}
+				}
+			} else {
+				ret = -1;
+				NOTIMP("!mem\n");
+				break;
+			}
+			break;
 		case 0x40://	INC		eAX
 			x->r.ip++;
 			printf("INC		AX\n");
@@ -225,18 +293,14 @@ static int step(xtem_t *x) {
 			x->r.si--;
 			break;
 #endif
-		// PC=fe0cd OPC=3B15
-		// 001110 1 1 00 010 101
-		// mod=0 reg=2 rm=5
-		// 000FE0CA  8915              mov    WORD PTR [di],dx
-		case 0x3B://	CMP		REG16,REG16/MEM16
-			mod = (opc[1] & 0xc0) >> 6;
-			reg = (opc[1] & 0x38) >> 3;
-			rm = opc[1] & 0x07;
-			mem = 0;
-			len = 2;
-			ret = -1;
-			NOTIMP("MOV		REG16/MEM16,REG16\n");
+		case 0x75://	JNZ		Ib
+			x->r.ip++;
+			Ib = *(uint8_t *)(opc + 1);
+			x->r.ip++;
+			printf("JNZ		Ib\n");
+			if (!(x->r.fl & ZF)) {
+				x->r.ip += Ib;
+			}
 			break;
 #if 1
 		// PC=fe0ca OPC=89 15
@@ -254,6 +318,7 @@ static int step(xtem_t *x) {
 				case 0x0://memory mode, no displacement follows except rm==6
 					switch (rm) {
 						case 0x5://(di)
+							printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
 							addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
 							memw(x, (void **)&mem, &len, addr);
 							if (!mem) {
@@ -318,7 +383,8 @@ static int step(xtem_t *x) {
 			Gv = *(uint16_t *)(opc + 2);
 			mem = 0;
 			len = 2;
-			addr = x->r.ds * 16 + Gv;
+			printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
+			addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + Gv;
 			memr(x, (void **)&mem, &len, addr);
 			if (!mem) {
 				NOTIMP("Failed to acquire mem\n");
@@ -387,9 +453,11 @@ static int step(xtem_t *x) {
 			}
 			switch (Sw) {
 				case 0xC://es
+					printf("SETTING ES=%04" PRIx16 "\n", regv);
 					x->r.es = regv;
 					break;
 				case 0xD://ds
+					printf("SETTING DS=%04" PRIx16 "\n", regv);
 					x->r.ds = regv;
 					break;
 				default:
@@ -402,6 +470,32 @@ static int step(xtem_t *x) {
 		case 0x90://	NOP
 			x->r.ip++;
 			printf("NOP\n");
+			break;
+		case 0xAB://	STOSW
+			x->r.ip++;
+			printf("STOSW\n");
+			printf("USING REP %s\n", x->def_rep == REP_REPNZ ? "REPNZ" : x->def_rep == REP_REPZ ? "REPZ" : "REP");
+			mem = 0;
+			len = 2;
+			addr = x->r.es * 16 + x->r.di;
+			memw(x, (void **)&mem, &len, addr);
+			if (!mem) {
+				NOTIMP("Failed to acquire mem\n");
+				return -1;
+			}
+			while (1) {
+				*((uint16_t *)mem) = x->r.ax;
+				x->r.di += 2;
+				if (x->def_rep == REP_NOT) {
+					break;
+				}
+				x->r.cx--;
+				if (((x->def_rep == REP_REPNZ) && (!x->r.cx)) ||
+				 ((x->def_rep == REP_REPZ) && (!x->r.cx))) {
+					break;
+				}
+			}
+//			ret = -1;
 			break;
 		case 0xB0 ... 0xB7://	MOV		Reg8	Ib
 			x->r.ip++;
@@ -520,8 +614,15 @@ static int step(xtem_t *x) {
 	}
 	break;
 	}
-	if (!pfx) {
+	if (!pfx_seg) {
 		x->def_seg = SEG_DS;
+	} else {
+		if (!ret) {
+			ret = 1;
+		}
+	}
+	if (!pfx_rep) {
+		x->def_rep = REP_NOT;
 	} else {
 		if (!ret) {
 			ret = 1;
@@ -558,7 +659,7 @@ int xtem_rsp_c(rsp_t *r) {
 	int ret = 0;
 	while (1) {
 		ret = step(r->x);
-		if (ret) {
+		if (ret < 0) {
 			break;
 		}
 	}
@@ -591,6 +692,8 @@ int xtem_rsp_g(rsp_t *r, char *data) {
 		WR_REG16(r->x->r.fl);
 		WR_REG16(r->x->r.cs);
 		WR_REG16(r->x->r.ss);
+		WR_REG16(r->x->r.ds);
+		WR_REG16(r->x->r.es);
 		WR_REG16(0);//fs
 		WR_REG16(0);//gs
 	} while (0);
