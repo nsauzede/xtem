@@ -7,15 +7,14 @@
 #include <malloc.h>
 
 #define NOTIMP(...) do{printf("NOTIMP :%d : ", __LINE__);printf(__VA_ARGS__);}while(0)
-
-#define AX x->r.ax
-#define CX x->r.cx
-#define DX x->r.dx
-#define BX x->r.bx
-#define SP x->r.sp
-#define BP x->r.bp
-#define SI x->r.si
-#define DI x->r.di
+#define AX x->r[0].w
+#define CX x->r[1].w
+#define DX x->r[2].w
+#define BX x->r[3].w
+#define SP x->r[4].w
+#define BP x->r[5].w
+#define SI x->r[6].w
+#define DI x->r[7].w
 
 #define IP x->ip
 #define FL x->fl
@@ -25,16 +24,15 @@
 #define ES x->s.es
 #define SS x->s.ss
 
-typedef struct {
-	uint16_t ax;
-	uint16_t cx;
-	uint16_t dx;
-	uint16_t bx;
-	uint16_t sp;
-	uint16_t bp;
-	uint16_t si;
-	uint16_t di;
-} regs_t;
+typedef union {
+	uint16_t w;
+	struct {
+		uint8_t l, h;
+	} b;
+} reg_t;
+
+typedef reg_t regs_t[8];
+
 typedef struct {
 	uint16_t cs;
 	uint16_t ss;
@@ -81,8 +79,8 @@ static int xtem_load_bios(xtem_t *x, char *bios_file) {
 	int bioslen = 0;
 	FILE *f = fopen(bios_file, "rb");
 	if (!f) {
-			perror("open bios file");
-			exit(1);
+		perror("open bios file");
+		exit(1);
 	}
 	fseek(f, 0, SEEK_END);
 	bioslen = ftell(f);
