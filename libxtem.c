@@ -8,6 +8,23 @@
 
 #define NOTIMP(...) do{printf("NOTIMP :%d : ", __LINE__);printf(__VA_ARGS__);}while(0)
 
+#define AX x->r.ax
+#define CX x->r.cx
+#define DX x->r.dx
+#define BX x->r.bx
+#define SP x->r.sp
+#define BP x->r.bp
+#define SI x->r.si
+#define DI x->r.di
+
+#define IP x->ip
+#define FL x->fl
+
+#define CS x->s.cs
+#define DS x->s.ds
+#define ES x->s.es
+#define SS x->s.ss
+
 typedef struct {
 	uint16_t ax;
 	uint16_t cx;
@@ -17,16 +34,19 @@ typedef struct {
 	uint16_t bp;
 	uint16_t si;
 	uint16_t di;
-	uint16_t ip;
-	uint16_t fl;
+} regs_t;
+typedef struct {
 	uint16_t cs;
 	uint16_t ss;
 	uint16_t ds;
 	uint16_t es;
-} regs_t;
+} segs_t;
 
 typedef struct {
 	regs_t r;
+	segs_t s;
+	uint16_t ip;
+	uint16_t fl;
 	unsigned char *bios;
 	unsigned char *ram;
 	enum {SEG_DS, SEG_ES} def_seg;
@@ -34,20 +54,20 @@ typedef struct {
 } xtem_t;
 
 static void xtem_reset(xtem_t *x) {
-	x->r.ax = 0x0000;
-	x->r.cx = 0x0000;
-	x->r.dx = 0x0480;
-	x->r.bx = 0x0000;
-	x->r.sp = 0x0000;
-	x->r.bp = 0x0000;
-	x->r.si = 0x0000;
-	x->r.di = 0x0000;
-	x->r.ip = 0xFFF0;
-	x->r.fl = 0x0002;
-	x->r.cs = 0xF000;
-	x->r.ss = 0x0000;
-	x->r.ds = 0x0000;
-	x->r.es = 0x0000;
+	AX = 0x0000;
+	CX = 0x0000;
+	DX = 0x0480;
+	BX = 0x0000;
+	SP = 0x0000;
+	BP = 0x0000;
+	SI = 0x0000;
+	DI = 0x0000;
+	IP = 0xFFF0;
+	FL = 0x0002;
+	CS = 0xF000;
+	SS = 0x0000;
+	DS = 0x0000;
+	ES = 0x0000;
 }
 
 #define RAM_FIRST 0x00000
@@ -142,7 +162,7 @@ static int step(xtem_t *x) {
 	int ret = 0;
 	uint8_t *_opc = 0, *opc;
 	int len = 8;
-	int pc = x->r.cs * 16 + x->r.ip;
+	int pc = CS * 16 + IP;
 	printf("%05x ", pc);
 	memr(x, (void **)&_opc, &len, pc);
 	if (!_opc) {
@@ -169,32 +189,32 @@ static int step(xtem_t *x) {
 #define AF 0x010
 #define PF 0x004
 #define CF 0x001
-	printf("RIGHT NOW DS=%04" PRIx16 "\n", x->r.ds);
+	printf("RIGHT NOW DS=%04" PRIx16 "\n", DS);
 	while (1) {
 	switch (opc[0]) {
 		case 0x26://	ES:
-			x->r.ip++;
+			IP++;
 			printf("ES:\n");
 			x->def_seg = SEG_ES;
 			pfx_seg = 1;
 			break;
 		case 0xF3://	REPZ:
-			x->r.ip++;
+			IP++;
 			printf("REPZ:\n");
 			x->def_rep = REP_REPZ;
 			pfx_rep = 1;
 			break;
 		case 0x33://	XOR		Gv	Ev
-			x->r.ip++;
+			IP++;
 			Ev = *(uint8_t *)(opc + 1);
-			x->r.ip++;
+			IP++;
 			printf("XOR		Gv	Ev\n");
 			switch (Ev) {
 				case 0xC0://ax,ax
-					Iw = x->r.ax = x->r.ax ^ x->r.ax;
+					Iw = AX = AX ^ AX;
 					break;
 				case 0xFF://di,di
-					Iw = x->r.di = x->r.di ^ x->r.di;
+					Iw = DI = DI ^ DI;
 					break;
 				default:
 					ret = -6;
@@ -202,14 +222,14 @@ static int step(xtem_t *x) {
 					break;
 			}
 			if (Iw == 0) {
-				x->r.fl |= ZF;
+				FL |= ZF;
 			} else {
-				x->r.fl &= ~ZF;
+				FL &= ~ZF;
 			}
 			if (parity_odd16(Iw)) {
-				x->r.fl |= PF;
+				FL |= PF;
 			} else {
-				x->r.fl &= ~PF;
+				FL &= ~PF;
 			}
 			break;
 		// PC=fe0cd OPC=3B15
@@ -228,7 +248,7 @@ static int step(xtem_t *x) {
 					switch (rm) {
 						case 0x5://(di)
 							printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-							addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
+							addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
 							memr(x, (void **)&mem, &len, addr);
 							if (!mem) {
 								NOTIMP("Failed to acquire mem\n");
@@ -250,7 +270,7 @@ static int step(xtem_t *x) {
 				uint16_t regv;
 				switch (reg) {
 					case 0x2:
-						regv = x->r.dx;
+						regv = DX;
 						break;
 					default:
 						ret = -5;
@@ -258,11 +278,11 @@ static int step(xtem_t *x) {
 						break;
 				}
 				if (!ret) {
-					x->r.ip += 2;
+					IP += 2;
 					if (*((uint16_t *)mem) == regv) {
-						x->r.fl |= ZF;
+						FL |= ZF;
 					} else {
-						x->r.fl &= ~ZF;
+						FL &= ~ZF;
 					}
 				}
 			} else {
@@ -272,34 +292,34 @@ static int step(xtem_t *x) {
 			}
 			break;
 		case 0x40://	INC		eAX
-			x->r.ip++;
+			IP++;
 			printf("INC		AX\n");
-			if (x->r.ax == 0xff) {
-				x->r.fl |= AF;
+			if (AX == 0xff) {
+				FL |= AF;
 			} else {
-				x->r.fl &= ~AF;
+				FL &= ~AF;
 			}
-			if (parity_odd16(x->r.ax)) {
-				x->r.fl |= PF;
+			if (parity_odd16(AX)) {
+				FL |= PF;
 			} else {
-				x->r.fl &= ~PF;
+				FL &= ~PF;
 			}
-			x->r.ax++;
+			AX++;
 			break;
 #if 0
 		case 0x4e://	DEC		eSI
-			x->r.ip++;
+			IP++;
 			printf("DEC		eSI\n");
-			x->r.si--;
+			SI--;
 			break;
 #endif
 		case 0x75://	JNZ		Ib
-			x->r.ip++;
+			IP++;
 			Ib = *(uint8_t *)(opc + 1);
-			x->r.ip++;
+			IP++;
 			printf("JNZ		Ib\n");
-			if (!(x->r.fl & ZF)) {
-				x->r.ip += Ib;
+			if (!(FL & ZF)) {
+				IP += Ib;
 			}
 			break;
 #if 1
@@ -319,7 +339,7 @@ static int step(xtem_t *x) {
 					switch (rm) {
 						case 0x5://(di)
 							printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-							addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + x->r.di;
+							addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
 							memw(x, (void **)&mem, &len, addr);
 							if (!mem) {
 								NOTIMP("Failed to acquire mem\n");
@@ -349,7 +369,7 @@ static int step(xtem_t *x) {
 				uint16_t regv;
 				switch (reg) {
 					case 0x2:
-						regv = x->r.dx;
+						regv = DX;
 						break;
 					default:
 						ret = -5;
@@ -357,7 +377,7 @@ static int step(xtem_t *x) {
 						break;
 				}
 				if (!ret) {
-					x->r.ip += 2;
+					IP += 2;
 					*((uint16_t *)mem) = regv;
 				}
 			} else {
@@ -384,46 +404,46 @@ static int step(xtem_t *x) {
 			mem = 0;
 			len = 2;
 			printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-			addr = (x->def_seg == SEG_ES ? x->r.es : x->r.ds) * 16 + Gv;
+			addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + Gv;
 			memr(x, (void **)&mem, &len, addr);
 			if (!mem) {
 				NOTIMP("Failed to acquire mem\n");
 				return -1;
 			}
 			switch (reg) {
-				case 0x06:x->r.si = *mem;break;
+				case 0x06:SI = *mem;break;
 				default:
 					ret = -5;
 					NOTIMP("reg=%02" PRIx8 "\n", reg);
 					break;
 			}
 			if (!ret) {
-				x->r.ip += 4;
+				IP += 4;
 			}
 			} else if (mod == 0x03) {
 				switch (rm) {
-					case 0x00:Iw = x->r.ax;break;
+					case 0x00:Iw = AX;break;
 					default:
 						ret = -5;
 						NOTIMP("rm=%02" PRIx8 "\n", rm);
 						break;
 				}
 				switch (reg) {
-					case 0x00:x->r.ax = Iw;break;
-					case 0x01:x->r.cx = Iw;break;
-					case 0x02:x->r.dx = Iw;break;
-					case 0x03:x->r.bx = Iw;break;
-					case 0x04:x->r.sp = Iw;break;
-					case 0x05:x->r.bp = Iw;break;
-					case 0x06:x->r.si = Iw;break;
-					case 0x07:x->r.di = Iw;break;
+					case 0x00:AX = Iw;break;
+					case 0x01:CX = Iw;break;
+					case 0x02:DX = Iw;break;
+					case 0x03:BX = Iw;break;
+					case 0x04:SP = Iw;break;
+					case 0x05:BP = Iw;break;
+					case 0x06:SI = Iw;break;
+					case 0x07:DI = Iw;break;
 					default:
 						ret = -5;
 						NOTIMP("reg=%02" PRIx8 "\n", reg);
 						break;
 				}
 				if (!ret) {
-					x->r.ip += 2;
+					IP += 2;
 				}
 			} else {
 				ret = -5;
@@ -433,18 +453,18 @@ static int step(xtem_t *x) {
 #endif
 #if 1
 		case 0x8E://	MOV		Sw	Ew
-			x->r.ip++;
+			IP++;
 			uint16_t Sw = (*(uint16_t *)(opc + 1) & 0xF0) >> 4;
 			uint16_t Ew = *(uint16_t *)(opc + 1) & 0x0F;
-			x->r.ip++;
+			IP++;
 			printf("MOV		Sw	Ew\n");
 			uint16_t regv;
 			switch (Ew) {
 				case 0x3://bx
-					regv = x->r.bx;
+					regv = BX;
 					break;
 				case 0x8://ax
-					regv = x->r.ax;
+					regv = AX;
 					break;
 				default:
 					ret = -5;
@@ -454,11 +474,11 @@ static int step(xtem_t *x) {
 			switch (Sw) {
 				case 0xC://es
 					printf("SETTING ES=%04" PRIx16 "\n", regv);
-					x->r.es = regv;
+					ES = regv;
 					break;
 				case 0xD://ds
 					printf("SETTING DS=%04" PRIx16 "\n", regv);
-					x->r.ds = regv;
+					DS = regv;
 					break;
 				default:
 					ret = -4;
@@ -468,138 +488,138 @@ static int step(xtem_t *x) {
 			break;
 #endif
 		case 0x90://	NOP
-			x->r.ip++;
+			IP++;
 			printf("NOP\n");
 			break;
 		case 0xAB://	STOSW
-			x->r.ip++;
+			IP++;
 			printf("STOSW\n");
 			printf("USING REP %s\n", x->def_rep == REP_REPNZ ? "REPNZ" : x->def_rep == REP_REPZ ? "REPZ" : "REP");
 			mem = 0;
 			len = 2;
-			addr = x->r.es * 16 + x->r.di;
+			addr = ES * 16 + DI;
 			memw(x, (void **)&mem, &len, addr);
 			if (!mem) {
 				NOTIMP("Failed to acquire mem\n");
 				return -1;
 			}
 			while (1) {
-				*((uint16_t *)mem) = x->r.ax;
-				x->r.di += 2;
+				*((uint16_t *)mem) = AX;
+				DI += 2;
 				if (x->def_rep == REP_NOT) {
 					break;
 				}
-				x->r.cx--;
-				if (((x->def_rep == REP_REPNZ) && (!x->r.cx)) ||
-				 ((x->def_rep == REP_REPZ) && (!x->r.cx))) {
+				CX--;
+				if (((x->def_rep == REP_REPNZ) && (!CX)) ||
+				 ((x->def_rep == REP_REPZ) && (!CX))) {
 					break;
 				}
 			}
 //			ret = -1;
 			break;
 		case 0xB0 ... 0xB7://	MOV		Reg8	Ib
-			x->r.ip++;
+			IP++;
 			reg = *(uint8_t *)(opc + 0) & 0x7;
 			Ib = *(uint8_t *)(opc + 1);
-			x->r.ip++;
+			IP++;
 			printf("MOV		Reg8=%01" PRIx8 "	Ib=%02" PRIx8 "\n", reg, Ib);
 			switch (reg) {
 				case 0x0:
-					x->r.ax &= 0xff00;x->r.ax |= Ib;
+					AX &= 0xff00;AX |= Ib;
 					break;
 				case 0x1:
-					x->r.cx &= 0xff00;x->r.cx |= Ib;
+					CX &= 0xff00;CX |= Ib;
 					break;
 				case 0x2:
-					x->r.dx &= 0xff00;x->r.dx |= Ib;
+					DX &= 0xff00;DX |= Ib;
 					break;
 				case 0x3:
-					x->r.bx &= 0xff00;x->r.bx |= Ib;
+					BX &= 0xff00;BX |= Ib;
 					break;
 				case 0x4:
-					x->r.ax &= 0xff;x->r.ax |= Ib << 8;
+					AX &= 0xff;AX |= Ib << 8;
 					break;
 				case 0x5:
-					x->r.cx &= 0xff;x->r.cx |= Ib << 8;
+					CX &= 0xff;CX |= Ib << 8;
 					break;
 				case 0x6:
-					x->r.dx &= 0xff;x->r.dx |= Ib << 8;
+					DX &= 0xff;DX |= Ib << 8;
 					break;
 				case 0x7:
-					x->r.bx &= 0xff;x->r.bx |= Ib << 8;
+					BX &= 0xff;BX |= Ib << 8;
 					break;
 			}
 			break;
 		case 0xB8 ... 0xBF://	MOV		Reg16	Iw
-			x->r.ip++;
+			IP++;
 			reg = *(uint8_t *)(opc + 0) & 0x7;
 			Iw = *(uint16_t *)(opc + 1);
-			x->r.ip += 2;
+			IP += 2;
 			printf("MOV		Reg16=%01" PRIx8 "	Ib=%04" PRIx16 "\n", reg, Iw);
 			switch (reg) {
 				case 0x0:
-					x->r.ax = Iw;
+					AX = Iw;
 					break;
 				case 0x1:
-					x->r.cx = Iw;
+					CX = Iw;
 					break;
 				case 0x2:
-					x->r.dx = Iw;
+					DX = Iw;
 					break;
 				case 0x3:
-					x->r.bx = Iw;
+					BX = Iw;
 					break;
 				case 0x4:
-					x->r.sp = Iw;
+					SP = Iw;
 					break;
 				case 0x5:
-					x->r.bp = Iw;
+					BP = Iw;
 					break;
 				case 0x6:
-					x->r.si = Iw;
+					SI = Iw;
 					break;
 				case 0x7:
-					x->r.di = Iw;
+					DI = Iw;
 					break;
 			}
 			break;
 		case 0xE6://	OUT		Ib	AL
-			x->r.ip++;
+			IP++;
 			Ib = *(uint8_t *)(opc + 1);
-			x->r.ip++;
+			IP++;
 			printf("OUT Ib=%02" PRIx8 " AL ???\n", Ib);
 			break;
 		case 0xea://	JMP		Ap
-			x->r.ip++;
+			IP++;
 			uint16_t ofs = *(uint16_t *)(opc + 1);
 			seg = *(uint16_t *)(opc + 3);
 			printf("JMP		Ap=%04" PRIx16 ":%04" PRIx16 "\n", seg, ofs);
-			x->r.cs = seg;
-			x->r.ip = ofs;
+			CS = seg;
+			IP = ofs;
 			break;
 		case 0xEE://	OUT		DX	AL
-			x->r.ip++;
-			printf("OUT DX=%04" PRIx16 " AL ???\n", x->r.dx);
+			IP++;
+			printf("OUT DX=%04" PRIx16 " AL ???\n", DX);
 			break;
 		case 0xfa://	CLI
-			x->r.ip++;
+			IP++;
 			printf("CLI\n");
-			x->r.fl &= ~(1 << 9);
+			FL &= ~(1 << 9);
 			break;
 		case 0xfc://	CLD
-			x->r.ip++;
+			IP++;
 			printf("CLD\n");
-			x->r.fl &= ~(1 << 10);
+			FL &= ~(1 << 10);
 			break;
 		case 0xFE://	GRP4	Eb
-			x->r.ip++;
+			IP++;
 			Eb = *(uint8_t *)(opc + 1);
-			x->r.ip++;
+			IP++;
 			printf("GRP4	Eb=%02" PRIx8 " : ", Eb);
 			switch (Eb) {
 				case 0xC0: //GRP4/0	INC
 					printf("INC		Al\n");
-					x->r.ax = (x->r.ax & 0xff00) + (((x->r.ax & 0xff) + 1));
+					AX = (AX & 0xff00) + (((AX & 0xff) + 1));
 					break;
 				default:
 					ret = -3;
@@ -680,20 +700,20 @@ int xtem_rsp_g(rsp_t *r, char *data) {
 	pos += snprintf(data + pos, 4 + 1, "%04" PRIx16, 0); \
 	} while (0)
 
-		WR_REG16(r->x->r.ax);
-		WR_REG16(r->x->r.cx);
-		WR_REG16(r->x->r.dx);
-		WR_REG16(r->x->r.bx);
-		WR_REG16(r->x->r.sp);
-		WR_REG16(r->x->r.bp);
-		WR_REG16(r->x->r.si);
-		WR_REG16(r->x->r.di);
-		WR_REG16(r->x->r.ip);
-		WR_REG16(r->x->r.fl);
-		WR_REG16(r->x->r.cs);
-		WR_REG16(r->x->r.ss);
-		WR_REG16(r->x->r.ds);
-		WR_REG16(r->x->r.es);
+		WR_REG16(r->AX);
+		WR_REG16(r->CX);
+		WR_REG16(r->DX);
+		WR_REG16(r->BX);
+		WR_REG16(r->SP);
+		WR_REG16(r->BP);
+		WR_REG16(r->SI);
+		WR_REG16(r->DI);
+		WR_REG16(r->IP);
+		WR_REG16(r->FL);
+		WR_REG16(r->CS);
+		WR_REG16(r->SS);
+		WR_REG16(r->DS);
+		WR_REG16(r->ES);
 		WR_REG16(0);//fs
 		WR_REG16(0);//gs
 	} while (0);
