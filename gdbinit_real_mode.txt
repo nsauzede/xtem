@@ -7,6 +7,8 @@
 # Freely inspired from "A user-friendly gdb configuration file" widely available
 # on the Internet
 
+#set debug remote 1
+
 set confirm off
 set verbose off
 set prompt \033[31mreal-mode-gdb$ \033[0m

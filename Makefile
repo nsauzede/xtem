@@ -7,6 +7,9 @@ CFLAGS+=-O0
 
 all: $(TARGET)
 
+pcemx: pcemx.c
+	$(CC) -o $@ $^ -pthread
+
 %.so: %.o
 	$(CC) -shared -o $@ $^
 

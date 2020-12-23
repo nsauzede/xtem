@@ -153,6 +153,54 @@ static int parity_odd16(uint16_t val) {
 	return 1;
 }
 
+#define CMPRANGE(p,a,b) ((port >= a) && (port <= b))
+#define CMPRANGE0(p,a) (port == a)
+char *hint_out0(int port, int data) {
+	data = data;
+	return
+CMPRANGE(port,0x0000,0x001F)?"The first legacy DMA controller, often used for transfers to floppies." :
+CMPRANGE(port,0x0020,0x0021)?"The first Programmable Interrupt Controller" :
+CMPRANGE(port,0x0022,0x0023)?"Access to the Model-Specific Registers of Cyrix processors." :
+CMPRANGE(port,0x0040,0x0047)?"The PIT (Programmable Interval Timer)" :
+CMPRANGE(port,0x0060,0x0064)?"The '8042' PS/2 Controller or its predecessors, dealing with keyboards and mice." :
+CMPRANGE(port,0x0070,0x0071)?"The CMOS and RTC registers" :
+CMPRANGE(port,0x0080,0x008F)?"The DMA (Page registers)" :
+CMPRANGE0(port,0x0092)?"The location of the fast A20 gate register" :
+CMPRANGE(port,0x00A0,0x00A1)?"The second PIC" :
+CMPRANGE(port,0x00C0,0x00DF)?"The second DMA controller, often used for soundblasters" :
+CMPRANGE0(port,0x00E9)?"Home of the Port E9 Hack. Used on some emulators to directly send text to the hosts' console." :
+CMPRANGE(port,0x0170,0x0177)?"The secondary ATA harddisk controller." :
+CMPRANGE(port,0x01F0,0x01F7)?"The primary ATA harddisk controller." :
+CMPRANGE(port,0x0278,0x027A)?"Parallel port" :
+CMPRANGE(port,0x02F8,0x02FF)?"Second serial port" :
+CMPRANGE(port,0x03B0,0x03DF)?"The range used for the IBM VGA, its direct predecessors, as well as any modern video card in legacy mode." :
+CMPRANGE(port,0x03F0,0x03F7)?"Floppy disk controller" :
+CMPRANGE(port,0x03F8,0x03FF)?"First serial port" :
+"???";
+}
+char *hint_out(int port, int data) {
+	data = data;
+	return
+CMPRANGE(port,0x0000,0x001F)?"first legacy DMA controller, floppies" :
+CMPRANGE(port,0x0020,0x0021)?"first Programmable Interrupt Controller" :
+CMPRANGE(port,0x0022,0x0023)?"Model-Specific Registers of Cyrix processors" :
+CMPRANGE(port,0x0040,0x0047)?"PIT (Programmable Interval Timer)" :
+CMPRANGE(port,0x0060,0x0064)?"'8042' PS/2 Controller, keyboards and mice" :
+CMPRANGE(port,0x0070,0x0071)?"CMOS and RTC registers" :
+CMPRANGE(port,0x0080,0x008F)?"DMA (Page registers)" :
+CMPRANGE0(port,0x0092)?"fast A20 gate register" :
+CMPRANGE(port,0x00A0,0x00A1)?"second PIC" :
+CMPRANGE(port,0x00C0,0x00DF)?"second DMA controller, soundblasters" :
+CMPRANGE0(port,0x00E9)?"Port E9 Hack" :
+CMPRANGE(port,0x0170,0x0177)?"secondary ATA harddisk controller" :
+CMPRANGE(port,0x01F0,0x01F7)?"primary ATA harddisk controller" :
+CMPRANGE(port,0x0278,0x027A)?"Parallel port" :
+CMPRANGE(port,0x02F8,0x02FF)?"Second serial port" :
+CMPRANGE(port,0x03B0,0x03DF)?"VGA" :
+CMPRANGE(port,0x03F0,0x03F7)?"Floppy disk controller" :
+CMPRANGE(port,0x03F8,0x03FF)?"First serial port" :
+"???";
+}
 // return : 0 => executed 1 insn succesfully
 // return : 1 => executed 1 prefix succesfully (eg: not atomic for IRQ handling)
 // return : <0 => error
@@ -585,7 +633,7 @@ static int step(xtem_t *x) {
 			IP++;
 			Ib = *(uint8_t *)(opc + 1);
 			IP++;
-			printf("OUT Ib=%02" PRIx8 " AL ???\n", Ib);
+			printf("OUT Ib=%02" PRIx8 " AL=%02" PRIx8 "\t\t[%s]\n", Ib, AX & 0xff, hint_out(Ib, AX & 0xff));
 			break;
 		case 0xea://	JMP		Ap
 			IP++;
@@ -597,7 +645,7 @@ static int step(xtem_t *x) {
 			break;
 		case 0xEE://	OUT		DX	AL
 			IP++;
-			printf("OUT DX=%04" PRIx16 " AL ???\n", DX);
+			printf("OUT DX=%04" PRIx16 " AL=%02" PRIx8 "\t[%s]\n", DX, AX & 0xff, hint_out(DX, AX & 0xff));
 			break;
 		case 0xfa://	CLI
 			IP++;
