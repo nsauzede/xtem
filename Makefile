@@ -7,7 +7,7 @@ CFLAGS+=-O0
 
 all: $(TARGET)
 
-pcemx: pcemx.c
+xtem: xtem.o libxtem.a
 	$(CC) -o $@ $^ -pthread
 
 %.so: %.o

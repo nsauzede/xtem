@@ -3,10 +3,12 @@
 #include "libxtem.h"
 
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <unistd.h>
 
 #define NOTIMP(...)                                                            \
   do {                                                                         \
@@ -305,7 +307,7 @@ step(xtem_t* x)
 #define AF 0x010
 #define PF 0x004
 #define CF 0x001
-  printf("RIGHT NOW DS=%04" PRIx16 "\n", DS);
+  //   printf("RIGHT NOW DS=%04" PRIx16 "\n", DS);
   while (1) {
     switch (opc[0]) {
       case 0x26: //	ES:
@@ -944,4 +946,42 @@ xtem_rsp_m(void* r_, char* data, int addr, int len)
   // printf("Hello data=%s -- press enter\n", data);
   // getchar();
   return 42;
+}
+
+// #include "librspd.h"
+void*
+libxtem_init()
+{
+  void* res = xtem_init();
+  //   void* rsp = ;
+  return res;
+}
+
+int
+libxtem_execute(void* x_)
+{
+  xtem_t* x = (xtem_t*)x_;
+  //   uint32_t PC = (CS << 4) + IP;
+  //   printf("PC=%08" PRIX32 "\n", PC);
+  printf("AX: %04" PRIX16 " ", AX);
+  printf("BX: %04" PRIX16 " ", BX);
+  printf("CX: %04" PRIX16 " ", CX);
+  printf("DX: %04" PRIX16 " ", DX);
+  printf("\n");
+  printf("SI: %04" PRIX16 " ", SI);
+  printf("DI: %04" PRIX16 " ", DI);
+  printf("SP: %04" PRIX16 " ", SP);
+  printf("BP: %04" PRIX16 " ", BP);
+  printf("\n");
+  printf("CS: %04" PRIX16 " ", CS);
+  printf("DS: %04" PRIX16 " ", DS);
+  printf("ES: %04" PRIX16 " ", ES);
+  printf("SS: %04" PRIX16 " ", SS);
+  printf("\n");
+  int n = step(x);
+  if (n != 1 && n != 0)
+    return 1;
+  //  return PC == 0xfe05d;
+  //   sleep(1);
+  return 0;
 }
