@@ -5,6 +5,7 @@
 
 #include "librspd.h"
 
+int xlen = 64;
 int
 rsp_question(void* rsp)
 {
@@ -13,13 +14,15 @@ rsp_question(void* rsp)
   return 0;
 }
 
+#define LEN64 (560 * 2)
+#define LEN32 (312 * 2)
 int
 rsp_get_regs(void* rsp)
 {
-  char buf[560 * 2 + 1];
-  memset(buf, '0', sizeof(buf));
-  buf[sizeof(buf) - 1] = 0;
-  rsp_send(rsp, buf, strlen(buf));
+  char buf[LEN64 + 1];
+  int len = xlen == 64 ? LEN64 : LEN32;
+  memset(buf, '0', len);
+  rsp_send(rsp, buf, len);
   return 0;
 }
 
@@ -33,8 +36,12 @@ rsp_read_mem(void* rsp, size_t addr, size_t len)
 }
 
 int
-main()
+main(int argc, char* argv[])
 {
+  int arg = 1;
+  if (arg < argc) {
+    sscanf(argv[arg++], "%d", &xlen);
+  }
   int port = 1235;
   void* rsp = rsp_init(&(rsp_init_t){ .port = port,
                                       .question = rsp_question,
