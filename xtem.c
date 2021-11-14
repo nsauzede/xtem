@@ -3,11 +3,10 @@
 int
 main()
 {
-  void* x = libxtem_init();
-  while (1) {
-    if (libxtem_execute(x)) {
-      break;
-    }
-  }
+  // int port = 0;
+  int port = 1235;
+  void* x = libxtem_init(port);
+  libxtem_execute(x);
+  libxtem_cleanup(x);
   return 0;
 }

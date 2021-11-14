@@ -934,8 +934,6 @@ int
 xtem_rsp_m(void* r_, char* data, int addr, int len)
 {
   rsp_t* r = (rsp_t*)r_;
-  // int len = strlen(data);
-  // printf("addr=%x len=%d\n", addr, len);
   unsigned char* buf = 0;
   memr(r->x, (void**)&buf, &len, addr);
   if (buf) {
@@ -943,24 +941,75 @@ xtem_rsp_m(void* r_, char* data, int addr, int len)
       sprintf(data + 2 * i, "%02x", buf[i]);
     }
   }
-  // printf("Hello data=%s -- press enter\n", data);
-  // getchar();
   return 42;
 }
 
-// #include "librspd.h"
-void*
-libxtem_init()
+#include "librspd.h"
+typedef struct
 {
-  void* res = xtem_init();
-  //   void* rsp = ;
-  return res;
+  void* x;
+  void* r;
+} lx_t;
+
+static int xlen = 32;
+static int
+rsp_question(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  char* buf = "S05";
+  rsp_send(lx->r, buf, strlen(buf));
+  return 0;
 }
 
-int
-libxtem_execute(void* x_)
+#define LEN64 (560 * 2)
+#define LEN32 (312 * 2)
+
+static int
+rsp_get_regs(void* lx_)
 {
-  xtem_t* x = (xtem_t*)x_;
+  lx_t* lx = (lx_t*)lx_;
+  char buf[LEN64 + 1];
+  int len = xlen == 64 ? LEN64 : LEN32;
+  memset(buf, '0', len);
+  xtem_rsp_g(&lx->x, buf);
+  rsp_send(lx->r, buf, len);
+  return 0;
+}
+
+static int
+rsp_read_mem(void* lx_, size_t addr, size_t len_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  int len = len_;
+  char* data = malloc(len * 2 + 1);
+  memset(data, '0', len * 2);
+  xtem_rsp_m(&lx->x, data, addr, len);
+  rsp_send(lx->r, data, len * 2);
+  free(data);
+  return 0;
+}
+
+static int
+rsp_stepi(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  xtem_rsp_s(&lx->x);
+  rsp_question(lx_);
+  return 0;
+}
+
+static int
+rsp_cont(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  xtem_rsp_c(&lx->x);
+  rsp_question(lx_);
+  return 0;
+}
+
+static int
+lx_dumpregs(xtem_t* x)
+{
   //   uint32_t PC = (CS << 4) + IP;
   //   printf("PC=%08" PRIX32 "\n", PC);
   printf("AX: %04" PRIX16 " ", AX);
@@ -978,10 +1027,58 @@ libxtem_execute(void* x_)
   printf("ES: %04" PRIX16 " ", ES);
   printf("SS: %04" PRIX16 " ", SS);
   printf("\n");
-  int n = step(x);
-  if (n != 1 && n != 0)
-    return 1;
-  //  return PC == 0xfe05d;
-  //   sleep(1);
   return 0;
+}
+
+void*
+libxtem_init(int rsp_port)
+{
+  lx_t* res = calloc(1, sizeof(lx_t));
+  printf("%s: lx=%p\n", __func__, res);
+  res->x = xtem_init();
+  if (rsp_port) {
+    res->r = rsp_init(&(rsp_init_t){
+      .user = res,
+      .port = rsp_port,
+      .question = rsp_question,
+      .get_regs = rsp_get_regs,
+      .read_mem = rsp_read_mem,
+      .stepi = rsp_stepi,
+      .cont = rsp_cont,
+    });
+  }
+  return res;
+}
+
+int
+libxtem_cleanup(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  if (lx) {
+    rsp_cleanup(lx->r);
+    xtem_cleanup(lx->x);
+  }
+  return 0;
+}
+
+int
+libxtem_execute(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+  xtem_t* x = lx->x;
+  if (lx->r)
+    return rsp_execute(lx->r);
+  else {
+    while (1) {
+      //   uint32_t PC = (CS << 4) + IP;
+      //   printf("PC=%08" PRIX32 "\n", PC);
+      lx_dumpregs(x);
+      int n = step(x);
+      if (n != 1 && n != 0)
+        return 1;
+    }
+    //  return PC == 0xfe05d;
+    //   sleep(1);
+    return 0;
+  }
 }

@@ -7,28 +7,28 @@
 
 typedef struct
 {
+  void* user;
   int port;
-  int (*question)(void* rsp);
-  int (*get_regs)(void* rsp);
-  int (*read_mem)(void* rsp, size_t addr, size_t len);
-  int (*cont)(void* rsp);
+  int (*question)(void* user);
+  int (*get_regs)(void* user);
+  int (*read_mem)(void* user, size_t addr, size_t len);
+  int (*stepi)(void* user);
+  int (*cont)(void* user);
 } rsp_init_t;
 
 void*
-rsp_init(rsp_init_t* init, int init_size);
+rsp_init(rsp_init_t* rsp_init);
 int
-rsp_port(void* rsp);
+rsp_execute(void* user);
 int
-rsp_execute(void* rsp);
-int
-rsp_send(void* rsp, const char* src, int size);
+rsp_send(void* user, const char* src, int size);
 int
 rsp_cleanup(void* rsp);
 
 #ifndef LIBRSP_HEADER_ONLY
 
 /* Private APIs / Implementation - Don't use, might change */
-#define RSP_DEBUG
+// #define RSP_DEBUG
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -54,12 +54,6 @@ rsp_cleanup(void* rsp);
   } while (0)
 #endif
 
-/*
-
-RSP User | RSP API |pipes| RSP THR/server |sock| RSP client
-
-*/
-
 typedef enum
 {
   rsp_state_invalid,
@@ -74,14 +68,7 @@ typedef enum
 
 typedef struct
 {
-  union
-  {
-    rsp_init_t init;
-    struct
-    {
-      int port;
-    };
-  };
+  rsp_init_t init;
 
   int from_thr[2];
   int to_thr[2];
@@ -115,7 +102,7 @@ rsp_write_cs(rsp_private_t* rsp, const void* buf, size_t count)
     dbg_printf("CS hangup\n");
     close(rsp->cs);
     rsp->cs = -1;
-    dbg_printf("Listening on port %d..\n", rsp->port);
+    dbg_printf("Listening on port %d..\n", rsp->init.port);
     rsp->state = rsp_state_listening;
   }
   if (n != (ssize_t)count) {
@@ -123,7 +110,7 @@ rsp_write_cs(rsp_private_t* rsp, const void* buf, size_t count)
       "CS incomplete write (needed %d succeeded %d)\n", (int)count, (int)n);
     close(rsp->cs);
     rsp->cs = -1;
-    dbg_printf("Listening on port %d..\n", rsp->port);
+    dbg_printf("Listening on port %d..\n", rsp->init.port);
     rsp->state = rsp_state_listening;
   }
   return n;
@@ -154,7 +141,7 @@ rsp_read_cs(rsp_private_t* rsp, void* buf, size_t count)
     dbg_printf("CS hangup\n");
     close(rsp->cs);
     rsp->cs = -1;
-    dbg_printf("Listening on port %d..\n", rsp->port);
+    dbg_printf("Listening on port %d..\n", rsp->init.port);
     rsp->state = rsp_state_listening;
   }
   if (n != (ssize_t)count) {
@@ -162,7 +149,7 @@ rsp_read_cs(rsp_private_t* rsp, void* buf, size_t count)
       "CS incomplete read (needed %d succeeded %d)\n", (int)count, (int)n);
     close(rsp->cs);
     rsp->cs = -1;
-    dbg_printf("Listening on port %d..\n", rsp->port);
+    dbg_printf("Listening on port %d..\n", rsp->init.port);
     rsp->state = rsp_state_listening;
   }
   return n;
@@ -257,10 +244,11 @@ rsp_handle(rsp_private_t* rsp)
       }
       rsp_write_cs(rsp, "+", 1);
       if (rsp->init.question) {
-        rsp->init.question(rsp);
+        rsp->init.question(rsp->init.user);
         break;
       } else {
-        dbg_printf("Unsupported question cb ?\n");
+        printf("Unsupported question cb ?\n");
+        exit(1);
       }
     } else if (c == 'g') {
       if (!rsp_valid_csum(rsp, csum)) {
@@ -268,10 +256,11 @@ rsp_handle(rsp_private_t* rsp)
       }
       rsp_write_cs(rsp, "+", 1);
       if (rsp->init.get_regs) {
-        rsp->init.get_regs(rsp);
+        rsp->init.get_regs(rsp->init.user);
         break;
       } else {
-        dbg_printf("Unsupported get_regs cb ?\n");
+        printf("Unsupported get_regs cb ?\n");
+        exit(1);
       }
     } else if (c == 'm') {
       size_t addr = 0, len = 0;
@@ -327,10 +316,35 @@ rsp_handle(rsp_private_t* rsp)
       }
       rsp_write_cs(rsp, "+", 1);
       if (rsp->init.read_mem) {
-        rsp->init.read_mem(rsp, addr, len);
+        rsp->init.read_mem(rsp->init.user, addr, len);
         break;
       } else {
-        dbg_printf("Unsupported read_mem cb ?\n");
+        printf("Unsupported read_mem cb ?\n");
+        exit(1);
+      }
+    } else if (c == 's') {
+      if (!rsp_valid_csum(rsp, csum)) {
+        break;
+      }
+      rsp_write_cs(rsp, "+", 1);
+      if (rsp->init.stepi) {
+        rsp->init.stepi(rsp->init.user);
+        break;
+      } else {
+        printf("Unsupported stepi cb ?\n");
+        exit(1);
+      }
+    } else if (c == 'c') {
+      if (!rsp_valid_csum(rsp, csum)) {
+        break;
+      }
+      rsp_write_cs(rsp, "+", 1);
+      if (rsp->init.cont) {
+        rsp->init.cont(rsp->init.user);
+        break;
+      } else {
+        printf("Unsupported cont cb ?\n");
+        exit(1);
       }
     } else {
       dbg_printf("Received unknown sync cmd '%c' (%x)\n", c, (int)c);
@@ -358,7 +372,7 @@ rsp_thread(void* arg)
   }
   struct sockaddr_in sa;
   sa.sin_family = AF_INET;
-  sa.sin_port = htons(rsp->port);
+  sa.sin_port = htons(rsp->init.port);
   sa.sin_addr.s_addr = INADDR_ANY;
   if (-1 == bind(rsp->ss, (struct sockaddr*)&sa, sizeof(sa))) {
     perror("bind");
@@ -368,7 +382,7 @@ rsp_thread(void* arg)
     perror("listen");
     exit(1);
   }
-  dbg_printf("Listening on port %d..\n", rsp->port);
+  dbg_printf("Listening on port %d..\n", rsp->init.port);
   rsp->state = rsp_state_listening;
   // must notify the waiting API
   rsp_write_from_thr(rsp, rsp->state);
@@ -417,7 +431,7 @@ rsp_thread(void* arg)
             perror("accept");
             exit(1);
           }
-          dbg_printf("Accepted %d on %d\n", rsp->cs, rsp->port);
+          dbg_printf("Accepted %d on %d\n", rsp->cs, rsp->init.port);
           rsp->state = rsp_state_accepted;
         }
         if (FD_ISSET(rsp->to_thr[0], &rfds)) {
@@ -433,11 +447,12 @@ rsp_thread(void* arg)
 }
 
 void*
-rsp_init(rsp_init_t* init, int size)
+rsp_init(rsp_init_t* init)
 {
-  if (!init || size != sizeof(rsp_init_t))
+  if (!init)
     return 0;
   rsp_private_t* rsp = calloc(1, sizeof(rsp_private_t));
+  dbg_printf("rsp=%p\n", rsp);
   rsp->init = *init;
   pipe(rsp->to_thr);
   pipe(rsp->from_thr);
@@ -446,7 +461,6 @@ rsp_init(rsp_init_t* init, int size)
     free(rsp);
     return 0;
   }
-  rsp_read_from_thr(rsp);
   return rsp;
 }
 
@@ -457,7 +471,7 @@ rsp_port(void* rsp_)
   if (!rsp)
     return -1;
   else
-    return rsp->port;
+    return rsp->init.port;
 }
 
 int
@@ -466,6 +480,15 @@ rsp_execute(void* rsp_)
   rsp_private_t* rsp = (rsp_private_t*)rsp_;
   if (!rsp)
     return 1;
+  while (1) {
+    dbg_printf("Reading..\n");
+    rsp_state_t state = rsp_read_from_thr(rsp);
+    if (state == rsp_state_accepted) {
+      dbg_printf("Accepted\n");
+    } else if (state == rsp_state_listening) {
+      dbg_printf("Listening\n");
+    }
+  }
   return 0;
 }
 
