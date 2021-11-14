@@ -2,7 +2,7 @@
 
 An XT emulator with RSP binding (for remote gdb connection).
 
-Copyright (C) 2020 Nicolas Sauzede <nsauzede@laposte.net>.
+Copyright (c) 2020-2021 Nicolas Sauzede <nsauzede@laposte.net>.
 
 # How to build/test
 
