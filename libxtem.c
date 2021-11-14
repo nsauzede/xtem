@@ -863,7 +863,9 @@ xtem_rsp_s(void* r_)
     } else if (n == 0) {
       break; // was an atomic insn
     } else {
-      exit(1); // was an error
+      printf("%s: an error ? n=%d\n", __func__, n);
+      // exit(1); // was an error
+      return n;
     }
   }
   return 42;
@@ -949,6 +951,8 @@ typedef struct
 {
   void* x;
   void* r;
+  int intr;
+  int kill;
 } lx_t;
 
 static int xlen = 32;
@@ -993,17 +997,67 @@ static int
 rsp_stepi(void* lx_)
 {
   lx_t* lx = (lx_t*)lx_;
-  xtem_rsp_s(&lx->x);
+  int ret = 0;
+  while (1) {
+    if (lx->intr) {
+      lx->intr = 0;
+      break;
+    }
+    printf("%s: doing step..\n", __func__);
+    int n = step(lx->x);
+    printf("%s: step returned %d\n", __func__, n);
+    if (n == 1) {
+      continue; // was a prefix
+    } else if (n == 0) {
+      break; // was an atomic insn
+    } else {
+      printf("%s: an error ? n=%d\n", __func__, n);
+      // exit(1); // was an error
+      ret = n;
+      break;
+    }
+  }
   rsp_question(lx_);
-  return 0;
+  return ret;
 }
 
 static int
 rsp_cont(void* lx_)
 {
   lx_t* lx = (lx_t*)lx_;
-  xtem_rsp_c(&lx->x);
+  int ret = 0;
+  while (1) {
+    if (lx->intr) {
+      lx->intr = 0;
+      break;
+    }
+    ret = step(lx->x);
+    if (ret < 0) {
+      break;
+    }
+  }
   rsp_question(lx_);
+  printf("%s: returning %d\n", __func__, ret);
+  return ret;
+}
+
+static int
+rsp_kill(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+
+  printf("%s: KILL!!!!!!!!!!!!!\n", __func__);
+  lx->kill = 1;
+  return 0;
+}
+
+static int
+rsp_intr(void* lx_)
+{
+  lx_t* lx = (lx_t*)lx_;
+
+  printf("%s: INTR!!!!!!!!!!!!!\n", __func__);
+  lx->intr = 1;
   return 0;
 }
 
@@ -1045,6 +1099,8 @@ libxtem_init(int rsp_port)
       .read_mem = rsp_read_mem,
       .stepi = rsp_stepi,
       .cont = rsp_cont,
+      .kill = rsp_kill,
+      .intr = rsp_intr,
     });
   }
   return res;

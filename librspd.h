@@ -14,6 +14,8 @@ typedef struct
   int (*read_mem)(void* user, size_t addr, size_t len);
   int (*stepi)(void* user);
   int (*cont)(void* user);
+  int (*kill)(void* user);
+  int (*intr)(void* user);
 } rsp_init_t;
 
 void*
@@ -28,7 +30,7 @@ rsp_cleanup(void* rsp);
 #ifndef LIBRSP_HEADER_ONLY
 
 /* Private APIs / Implementation - Don't use, might change */
-// #define RSP_DEBUG
+#define RSP_DEBUG
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -43,10 +45,13 @@ rsp_cleanup(void* rsp);
 #include <netinet/in.h>
 
 #ifdef RSP_DEBUG
+static int rsp_debug = 0;
 #define dbg_printf(...)                                                        \
   do {                                                                         \
-    printf("%s:%d:%s: ", __FILE__, __LINE__, __func__);                        \
-    printf(__VA_ARGS__);                                                       \
+    if (rsp_debug) {                                                           \
+      printf("%s:%d:%s: ", __FILE__, __LINE__, __func__);                      \
+      printf(__VA_ARGS__);                                                     \
+    }                                                                          \
   } while (0)
 #else
 #define dbg_printf(...)                                                        \
@@ -59,11 +64,20 @@ typedef enum
   rsp_state_invalid,
   rsp_state_listening,
   rsp_state_accepted,
+  // rsp_state_running,
 } rsp_state_t;
 
 typedef enum
 {
   rsp_cmd_invalid,
+
+  rsp_cmd_state,
+
+  rsp_cmd_none,
+  rsp_cmd_question,
+  rsp_cmd_stepi,
+  rsp_cmd_cont,
+  rsp_cmd_kill,
 } rsp_cmd_t;
 
 typedef struct
@@ -80,18 +94,18 @@ typedef struct
 
 } rsp_private_t;
 
-static rsp_state_t
+static rsp_cmd_t
 rsp_read_from_thr(rsp_private_t* rsp)
 {
-  rsp_state_t state;
-  read(rsp->from_thr[0], &state, sizeof(state));
-  return state;
+  rsp_cmd_t cmd;
+  read(rsp->from_thr[0], &cmd, sizeof(cmd));
+  return cmd;
 }
 
 static void
-rsp_write_from_thr(rsp_private_t* rsp, rsp_state_t state)
+rsp_write_from_thr(rsp_private_t* rsp, rsp_cmd_t cmd)
 {
-  write(rsp->from_thr[1], &state, sizeof(state));
+  write(rsp->from_thr[1], &cmd, sizeof(cmd));
 }
 
 static ssize_t
@@ -216,7 +230,7 @@ rsp_throw_packet(rsp_private_t* rsp)
   return 1;
 }
 
-static void
+static rsp_cmd_t
 rsp_handle(rsp_private_t* rsp)
 {
   while (rsp->cs != -1) {
@@ -227,6 +241,17 @@ rsp_handle(rsp_private_t* rsp)
     dbg_printf("Got CS0 '%c' (%x)\n", c, (int)c);
     if (c == '+')
       continue;
+    if (c == 3) {
+      dbg_printf("INTR!!!\n");
+      if (rsp->init.intr) {
+        rsp->init.intr(rsp->init.user);
+        break;
+      } else {
+        printf("Unsupported intr cb ?\n");
+        exit(1);
+      }
+      break;
+    }
     if (c != '$') {
       dbg_printf("Received unknown async cmd '%c' (%x)\n", c, (int)c);
       break;
@@ -243,13 +268,7 @@ rsp_handle(rsp_private_t* rsp)
         break;
       }
       rsp_write_cs(rsp, "+", 1);
-      if (rsp->init.question) {
-        rsp->init.question(rsp->init.user);
-        break;
-      } else {
-        printf("Unsupported question cb ?\n");
-        exit(1);
-      }
+      return rsp_cmd_question;
     } else if (c == 'g') {
       if (!rsp_valid_csum(rsp, csum)) {
         break;
@@ -327,25 +346,19 @@ rsp_handle(rsp_private_t* rsp)
         break;
       }
       rsp_write_cs(rsp, "+", 1);
-      if (rsp->init.stepi) {
-        rsp->init.stepi(rsp->init.user);
-        break;
-      } else {
-        printf("Unsupported stepi cb ?\n");
-        exit(1);
-      }
+      return rsp_cmd_stepi;
     } else if (c == 'c') {
       if (!rsp_valid_csum(rsp, csum)) {
         break;
       }
       rsp_write_cs(rsp, "+", 1);
-      if (rsp->init.cont) {
-        rsp->init.cont(rsp->init.user);
+      return rsp_cmd_cont;
+    } else if (c == 'k') {
+      if (!rsp_valid_csum(rsp, csum)) {
         break;
-      } else {
-        printf("Unsupported cont cb ?\n");
-        exit(1);
       }
+      rsp_write_cs(rsp, "+", 1);
+      return rsp_cmd_kill;
     } else {
       dbg_printf("Received unknown sync cmd '%c' (%x)\n", c, (int)c);
       if (!rsp_throw_packet(rsp)) {
@@ -356,6 +369,7 @@ rsp_handle(rsp_private_t* rsp)
     rsp_write_cs(rsp, "$#00", 4);
     break;
   }
+  return rsp_cmd_none;
 }
 
 static void*
@@ -382,10 +396,10 @@ rsp_thread(void* arg)
     perror("listen");
     exit(1);
   }
-  dbg_printf("Listening on port %d..\n", rsp->init.port);
+  printf("Listening on port %d..\n", rsp->init.port);
   rsp->state = rsp_state_listening;
   // must notify the waiting API
-  rsp_write_from_thr(rsp, rsp->state);
+  rsp_write_from_thr(rsp, rsp_cmd_state);
 
   while (1) {
     if (rsp->cs == -1) {
@@ -422,7 +436,9 @@ rsp_thread(void* arg)
         dbg_printf("Something to read! %d\n", n);
         if (rsp->cs != -1 && FD_ISSET(rsp->cs, &rfds)) {
           dbg_printf("Reading CS\n");
-          rsp_handle(rsp);
+          rsp_cmd_t cmd = rsp_handle(rsp);
+          dbg_printf("WRITING CMD=%d\n", cmd);
+          rsp_write_from_thr(rsp, cmd);
         }
         if (rsp->ss != -1 && FD_ISSET(rsp->ss, &rfds)) {
           dbg_printf("Reading SS\n");
@@ -480,13 +496,45 @@ rsp_execute(void* rsp_)
   rsp_private_t* rsp = (rsp_private_t*)rsp_;
   if (!rsp)
     return 1;
-  while (1) {
+  int killed = 0;
+  while (!killed) {
     dbg_printf("Reading..\n");
-    rsp_state_t state = rsp_read_from_thr(rsp);
-    if (state == rsp_state_accepted) {
-      dbg_printf("Accepted\n");
-    } else if (state == rsp_state_listening) {
-      dbg_printf("Listening\n");
+    rsp_cmd_t cmd = rsp_read_from_thr(rsp);
+    if (cmd == rsp_cmd_none) {
+    } else if (cmd == rsp_cmd_state) {
+    } else if (cmd == rsp_cmd_question) {
+      if (rsp->init.question) {
+        rsp->init.question(rsp->init.user);
+      } else {
+        printf("Unsupported question cb ?\n");
+        exit(1);
+      }
+    } else if (cmd == rsp_cmd_cont) {
+      if (rsp->init.cont) {
+        rsp->init.cont(rsp->init.user);
+      } else {
+        printf("Unsupported cont cb ?\n");
+        exit(1);
+      }
+    } else if (cmd == rsp_cmd_stepi) {
+      if (rsp->init.stepi) {
+        rsp->init.stepi(rsp->init.user);
+      } else {
+        printf("Unsupported stepi cb ?\n");
+        exit(1);
+      }
+    } else if (cmd == rsp_cmd_kill) {
+      killed = 1;
+      if (rsp->init.kill) {
+        rsp->init.kill(rsp->init.user);
+        // break;
+      } else {
+        printf("Unsupported kill cb ?\n");
+        // exit(1);
+      }
+    } else {
+      printf("%s: unknown cmd %d\n", __func__, cmd);
+      exit(1);
     }
   }
   return 0;
