@@ -29,3 +29,4 @@ clean:
 clobber: clean
 
 mrproper: clobber
+	$(RM) -Rf librspd
