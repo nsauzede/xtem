@@ -1,0 +1,3 @@
+[submodule "librspd"]
+	path = librspd
+	url = https://github.com/nsauzede/librspd
