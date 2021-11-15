@@ -59,6 +59,8 @@ typedef struct
   uint16_t fl;
   unsigned char* bios;
   unsigned char* ram;
+  unsigned char* membuf;
+  int membuflen;
   enum
   {
     SEG_DS,
@@ -138,20 +140,20 @@ xtem_cleanup(xtem_t* x)
     if (x->ram) {
       free(x->ram);
     }
+    if (x->membuf) {
+      free(x->membuf);
+    }
     free(x);
   }
   return 0;
 }
 
-static unsigned char* membuf = 0;
-static int membuflen = 0;
 /*	read memory without side effects
         caller expects a backdoor memory pointer in return
 */
 static void
 memr(xtem_t* x, void** dest, int* len, int addr)
 {
-  x = x;
   if ((addr >= RAM_FIRST) && (addr <= RAM_LAST)) {
     *dest = x->ram + addr - RAM_FIRST;
     if (addr + *len > RAM_LAST) {
@@ -164,19 +166,19 @@ memr(xtem_t* x, void** dest, int* len, int addr)
       *len = BIOS_LAST - addr + 1;
     }
   } else {
-    if (!membuf) {
-      membuf = calloc(1, membuflen = *len);
+    if (!x->membuf) {
+      x->membuf = calloc(1, x->membuflen = *len);
     }
-    if (*len > membuflen) {
-      membuf = realloc(membuf, membuflen = *len);
+    if (*len > x->membuflen) {
+      x->membuf = realloc(x->membuf, x->membuflen = *len);
     }
     for (int i = 0; i < *len; i++) {
       if ((addr + i) <= MEM_LAST) {
-        membuf[i] = 0xcc;
+        x->membuf[i] = 0xcc;
       } else {
       }
     }
-    *dest = membuf;
+    *dest = x->membuf;
   }
 }
 
