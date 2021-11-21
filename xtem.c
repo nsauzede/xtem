@@ -10,7 +10,12 @@ main(int argc, char* argv[])
     sscanf(argv[arg++], "%d", &port);
   }
   void* x = libxtem_init(port);
-  libxtem_execute(x);
+  while (1) {
+    int n = libxtem_execute(x);
+    printf("%s: n=%d\n", __func__, n);
+    if (n < 0)
+      break;
+  }
   libxtem_cleanup(x);
   return 0;
 }

@@ -1005,21 +1005,21 @@ rsp_stepi(void* lx_)
       lx->intr = 0;
       break;
     }
-    printf("%s: doing step..\n", __func__);
+    //printf("%s: doing step..\n", __func__);
     int n = step(lx->x);
-    printf("%s: step returned %d\n", __func__, n);
+    //printf("%s: step returned %d\n", __func__, n);
     if (n == 1) {
       continue; // was a prefix
     } else if (n == 0) {
+      ret = 1;
       break; // was an atomic insn
     } else {
-      printf("%s: an error ? n=%d\n", __func__, n);
+      //printf("%s: an error ? n=%d\n", __func__, n);
       // exit(1); // was an error
       ret = n;
       break;
     }
   }
-  rsp_question(lx_);
   return ret;
 }
 
@@ -1039,7 +1039,7 @@ rsp_cont(void* lx_)
     }
   }
   rsp_question(lx_);
-  printf("%s: returning %d\n", __func__, ret);
+  //printf("%s: returning %d\n", __func__, ret);
   return ret;
 }
 
@@ -1050,7 +1050,7 @@ rsp_kill(void* lx_)
 
   printf("%s: KILL!!!!!!!!!!!!!\n", __func__);
   lx->kill = 1;
-  return 0;
+  return -1;
 }
 
 static int
@@ -1060,6 +1060,7 @@ rsp_intr(void* lx_)
 
   printf("%s: INTR!!!!!!!!!!!!!\n", __func__);
   lx->intr = 1;
+  rsp_stopped(lx->r);
   return 0;
 }
 
@@ -1096,6 +1097,7 @@ libxtem_init(int rsp_port)
     res->r = rsp_init(&(rsp_init_t){
       .user = res,
       .port = rsp_port,
+//      .debug = 1,
       .question = rsp_question,
       .get_regs = rsp_get_regs,
       .read_mem = rsp_read_mem,
