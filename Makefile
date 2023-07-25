@@ -2,6 +2,7 @@ TARGET=libxtem.so
 TARGET+=xtem
 
 CFLAGS:=-Wall -Werror -Wextra
+CFLAGS+=-Wconversion -Wsign-conversion
 CFLAGS+=-fPIC
 CFLAGS+=-g
 CFLAGS+=-O0

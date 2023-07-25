@@ -1,6 +1,8 @@
 #ifndef libxtem_h
 #define libxtem_h
 
+#include <stddef.h>
+
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 /* Flaky RSP API */
@@ -12,7 +14,7 @@ xtem_rsp_s(void* r);
 int
 xtem_rsp_g(void* r, char* data);
 int
-xtem_rsp_m(void* r, char* data, int len, int addr);
+xtem_rsp_m(void* r, char* data, size_t len, size_t addr);
 int
 xtem_rsp_cleanup(void* r);
 

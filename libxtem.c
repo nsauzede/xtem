@@ -60,7 +60,7 @@ typedef struct
   unsigned char* bios;
   unsigned char* ram;
   unsigned char* membuf;
-  int membuflen;
+  size_t membuflen;
   enum
   {
     SEG_DS,
@@ -103,15 +103,15 @@ xtem_reset(xtem_t* x)
 static int
 xtem_load_bios(xtem_t* x, char* bios_file)
 {
-  int bioslen = 0;
+  size_t bioslen = 0;
   FILE* f = fopen(bios_file, "rb");
   if (!f) {
     perror("open bios file");
     exit(1);
   }
   fseek(f, 0, SEEK_END);
-  bioslen = ftell(f);
-  printf("reading bios file %" PRIu32 "\n", bioslen);
+  bioslen = (size_t)ftell(f);
+  printf("reading bios file %lu\n", (unsigned long)bioslen);
   rewind(f);
   x->bios = calloc(1, bioslen);
   fread(x->bios, bioslen, 1, f);
@@ -152,9 +152,9 @@ xtem_cleanup(xtem_t* x)
         caller expects a backdoor memory pointer in return
 */
 static void
-memr(xtem_t* x, void** dest, int* len, int addr)
+memr(xtem_t* x, void** dest, size_t* len, size_t addr)
 {
-  if ((addr >= RAM_FIRST) && (addr <= RAM_LAST)) {
+  if (/*(addr >= RAM_FIRST) &&*/ (addr <= RAM_LAST)) {
     *dest = x->ram + addr - RAM_FIRST;
     if (addr + *len > RAM_LAST) {
       *len = RAM_LAST - addr + 1;
@@ -172,7 +172,7 @@ memr(xtem_t* x, void** dest, int* len, int addr)
     if (*len > x->membuflen) {
       x->membuf = realloc(x->membuf, x->membuflen = *len);
     }
-    for (int i = 0; i < *len; i++) {
+    for (size_t i = 0; i < *len; i++) {
       if ((addr + i) <= MEM_LAST) {
         x->membuf[i] = 0xcc;
       } else {
@@ -183,7 +183,7 @@ memr(xtem_t* x, void** dest, int* len, int addr)
 }
 
 static void
-memw(xtem_t* x, void** dest, int* len, int addr)
+memw(xtem_t* x, void** dest, size_t* len, size_t addr)
 {
   memr(x, dest, len, addr);
 }
@@ -281,9 +281,9 @@ step(xtem_t* x)
 {
   int ret = 0;
   uint8_t *_opc = 0, *opc;
-  int len = 8;
-  int pc = CS * 16 + IP;
-  printf("%05x ", pc);
+  size_t len = 8;
+  size_t pc = (size_t)CS * 16 + IP;
+  printf("%05x ", (unsigned)pc);
   memr(x, (void**)&_opc, &len, pc);
   if (!_opc) {
     return 1;
@@ -297,7 +297,7 @@ step(xtem_t* x)
   uint8_t mod, reg, rm;
 #if 1
   uint16_t* mem;
-  int addr;
+  size_t addr;
   uint16_t Gv;
 #endif
 #define OF 0x800
@@ -344,12 +344,12 @@ step(xtem_t* x)
         if (Iw == 0) {
           FL |= ZF;
         } else {
-          FL &= ~ZF;
+          FL &= (uint16_t)~ZF;
         }
         if (parity_odd16(Iw)) {
           FL |= PF;
         } else {
-          FL &= ~PF;
+          FL &= (uint16_t)~PF;
         }
         break;
       // PC=fe0cd OPC=3B15
@@ -368,7 +368,7 @@ step(xtem_t* x)
             switch (rm) {
               case 0x5: //(di)
                 printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-                addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
+                addr = (size_t)(x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
                 memr(x, (void**)&mem, &len, addr);
                 if (!mem) {
                   NOTIMP("Failed to acquire mem\n");
@@ -409,7 +409,7 @@ step(xtem_t* x)
             if (*((uint16_t*)mem) == regv) {
               FL |= ZF;
             } else {
-              FL &= ~ZF;
+              FL &= (uint16_t)~ZF;
             }
           }
         } else {
@@ -424,12 +424,12 @@ step(xtem_t* x)
         if (AX == 0xff) {
           FL |= AF;
         } else {
-          FL &= ~AF;
+          FL &= (uint16_t)~AF;
         }
         if (parity_odd16(AX)) {
           FL |= PF;
         } else {
-          FL &= ~PF;
+          FL &= (uint16_t)~PF;
         }
         AX++;
         break;
@@ -466,7 +466,7 @@ step(xtem_t* x)
             switch (rm) {
               case 0x5: //(di)
                 printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-                addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
+                addr = (size_t)(x->def_seg == SEG_ES ? ES : DS) * 16 + DI;
                 memw(x, (void**)&mem, &len, addr);
                 if (!mem) {
                   NOTIMP("Failed to acquire mem\n");
@@ -538,7 +538,7 @@ step(xtem_t* x)
           mem = 0;
           len = 2;
           printf("USING SEG %s\n", x->def_seg == SEG_ES ? "ES" : "DS");
-          addr = (x->def_seg == SEG_ES ? ES : DS) * 16 + Gv;
+          addr = (size_t)(x->def_seg == SEG_ES ? ES : DS) * 16 + Gv;
           memr(x, (void**)&mem, &len, addr);
           if (!mem) {
             NOTIMP("Failed to acquire mem\n");
@@ -654,7 +654,7 @@ step(xtem_t* x)
                                         : "REP");
         mem = 0;
         len = 2;
-        addr = ES * 16 + DI;
+        addr = (size_t)ES * 16 + DI;
         memw(x, (void**)&mem, &len, addr);
         if (!mem) {
           NOTIMP("Failed to acquire mem\n");
@@ -777,12 +777,12 @@ step(xtem_t* x)
       case 0xfa: //	CLI
         IP++;
         printf("CLI\n");
-        FL &= ~(1 << 9);
+        FL &= (uint16_t)~(1 << 9);
         break;
       case 0xfc: //	CLD
         IP++;
         printf("CLD\n");
-        FL &= ~(1 << 10);
+        FL &= (uint16_t)~(1 << 10);
         break;
       case 0xFE: //	GRP4	Eb
         IP++;
@@ -792,7 +792,7 @@ step(xtem_t* x)
         switch (Eb) {
           case 0xC0: // GRP4/0	INC
             printf("INC		Al\n");
-            AX = (AX & 0xff00) + (((AX & 0xff) + 1));
+            AX = (AX & 0xff00) | (((AX & 0xff) + 1));
             break;
           default:
             ret = -3;
@@ -804,7 +804,7 @@ step(xtem_t* x)
         ret = -2;
         NOTIMP("PC=%05" PRIx32 " OPC=%02" PRIx8 " %02" PRIx8 " %02" PRIx8
                " %02" PRIx8 "\n",
-               pc,
+               (uint32_t)pc,
                opc[0],
                opc[1],
                opc[2],
@@ -891,7 +891,7 @@ int
 xtem_rsp_g(void* r_, char* data)
 {
   rsp_t* r = (rsp_t*)r_;
-  int len = strlen(data);
+  int len = (int)strlen(data);
   //	printf("len=%d\n", len);
   int pos = 0;
   do {
@@ -935,13 +935,13 @@ xtem_rsp_g(void* r_, char* data)
 }
 
 int
-xtem_rsp_m(void* r_, char* data, int addr, int len)
+xtem_rsp_m(void* r_, char* data, size_t addr, size_t len)
 {
   rsp_t* r = (rsp_t*)r_;
   unsigned char* buf = 0;
   memr(r->x, (void**)&buf, &len, addr);
   if (buf) {
-    for (int i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
       sprintf(data + 2 * i, "%02x", buf[i]);
     }
   }
@@ -975,7 +975,7 @@ rsp_get_regs(void* lx_)
 {
   lx_t* lx = (lx_t*)lx_;
   char buf[LEN64 + 1];
-  int len = xlen == 64 ? LEN64 : LEN32;
+  size_t len = xlen == 64 ? LEN64 : LEN32;
   memset(buf, '0', len);
   xtem_rsp_g(&lx->x, buf);
   rsp_send(lx->r, buf, len);
@@ -986,7 +986,7 @@ static int
 rsp_read_mem(void* lx_, size_t addr, size_t len_)
 {
   lx_t* lx = (lx_t*)lx_;
-  int len = len_;
+  size_t len = len_;
   char* data = malloc(len * 2 + 1);
   memset(data, '0', len * 2);
   xtem_rsp_m(&lx->x, data, addr, len);
